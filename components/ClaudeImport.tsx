@@ -6,6 +6,7 @@ import {
   AlertCircle,
   RefreshCw,
   Share2,
+  Download,
 } from 'lucide-react';
 import type { ClaudeConversation, ImportProgress } from '@/lib/types';
 import { t } from '@/lib/i18n';
@@ -14,7 +15,7 @@ interface Props {
   onProgress: (progress: ImportProgress | null) => void;
 }
 
-type ImportState = 'idle' | 'extracting' | 'ready' | 'importing' | 'success' | 'error';
+type ImportState = 'idle' | 'extracting' | 'ready' | 'downloading' | 'success' | 'error';
 type AIPlatform = 'claude' | 'chatgpt' | 'gemini' | null;
 
 const PLATFORM_CONFIG: Record<string, { name: string; platform: AIPlatform; script: string; icon: string }> = {
@@ -122,38 +123,30 @@ export function ClaudeImport({ onProgress }: Props) {
     });
   }, [currentTabId, platformInfo, autoExtracted, state, handleExtract]);
 
-  const handleImport = async () => {
+  const handleDownload = async () => {
     if (!conversation) return;
     const pairs = conversation.pairs || [];
     const selected = pairs.filter((p) => selectedPairIds.has(p.id));
     if (selected.length === 0) return;
 
-    setState('importing');
-    setError('');
+    setState('downloading');
 
-    onProgress({
-      total: 1,
-      completed: 0,
-      items: [{ url: conversation.url, status: 'importing' }],
-    });
+    const platform = conversation.url.includes('chatgpt.com') || conversation.url.includes('chat.openai.com')
+      ? 'ChatGPT' : conversation.url.includes('gemini.google.com') ? 'Gemini' : 'Claude';
+    const lines: string[] = [`# ${conversation.title}`, '', `**来源**: ${platform} 对话`, `**URL**: ${conversation.url}`, '', '---', ''];
+    for (const pair of selected) {
+      if (pair.question) { lines.push('## 👤 Human', '', pair.question, ''); }
+      if (pair.answer) { lines.push(`## 🤖 ${platform}`, '', pair.answer, ''); }
+      lines.push('---', '');
+    }
 
-    chrome.runtime.sendMessage(
-      {
-        type: 'IMPORT_CLAUDE_CONVERSATION',
-        conversation: { ...conversation, pairs: selected },
-        selectedMessageIds: [], // Not used in new flow
-      },
-      (response) => {
-        onProgress(null);
-        if (response?.success) {
-          setState('success');
-          setTimeout(() => setState('ready'), 3000);
-        } else {
-          setState('error');
-          setError(response?.error || t('importFailed'));
-        }
-      }
-    );
+    const markdown = lines.join('\n');
+    const filename = `${conversation.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)}.md`;
+    const encoded = btoa(unescape(encodeURIComponent(markdown)));
+    const dataUrl = `data:text/markdown;base64,${encoded}`;
+    await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
+    setState('success');
+    setTimeout(() => setState('ready'), 3000);
   };
 
   const togglePair = (id: string) => {
@@ -200,19 +193,19 @@ export function ClaudeImport({ onProgress }: Props) {
           <p className="text-xs font-medium text-gray-600">{t('claude.guideTitle')}</p>
           <ol className="text-xs text-gray-500 space-y-2 list-none">
             <li className="flex gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-notebooklm-blue/10 text-notebooklm-blue text-[10px] font-semibold flex items-center justify-center flex-shrink-0">1</span>
+              <span className="w-5 h-5 rounded-full bg-brand-600/10 text-brand-600 text-[10px] font-semibold flex items-center justify-center flex-shrink-0">1</span>
               <span>{t('claude.guideStep1')}</span>
             </li>
             <li className="flex gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-notebooklm-blue/10 text-notebooklm-blue text-[10px] font-semibold flex items-center justify-center flex-shrink-0">2</span>
+              <span className="w-5 h-5 rounded-full bg-brand-600/10 text-brand-600 text-[10px] font-semibold flex items-center justify-center flex-shrink-0">2</span>
               <span>{t('claude.guideStep2')}</span>
             </li>
             <li className="flex gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-notebooklm-blue/10 text-notebooklm-blue text-[10px] font-semibold flex items-center justify-center flex-shrink-0">3</span>
+              <span className="w-5 h-5 rounded-full bg-brand-600/10 text-brand-600 text-[10px] font-semibold flex items-center justify-center flex-shrink-0">3</span>
               <span>{t('claude.guideStep3')}</span>
             </li>
             <li className="flex gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-notebooklm-blue/10 text-notebooklm-blue text-[10px] font-semibold flex items-center justify-center flex-shrink-0">4</span>
+              <span className="w-5 h-5 rounded-full bg-brand-600/10 text-brand-600 text-[10px] font-semibold flex items-center justify-center flex-shrink-0">4</span>
               <span>{t('claude.guideStep4')}</span>
             </li>
           </ol>
@@ -231,7 +224,7 @@ export function ClaudeImport({ onProgress }: Props) {
         <button
           onClick={handleExtract}
           disabled={state === 'extracting'}
-          className="w-full py-3 bg-notebooklm-blue text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
+          className="w-full py-3 bg-brand-600 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
         >
           {state === 'extracting' ? (
             <><Loader2 className="w-4 h-4 animate-spin" />{t('claude.extracting')}</>
@@ -313,7 +306,7 @@ export function ClaudeImport({ onProgress }: Props) {
               type="checkbox"
               checked={selectedPairIds.has(pair.id)}
               onChange={() => togglePair(pair.id)}
-              className="mt-1 rounded border-gray-300 text-notebooklm-blue focus:ring-notebooklm-blue"
+              className="mt-1 rounded border-gray-300 text-brand-600 focus:ring-brand-600"
             />
             <div className="flex-1 min-w-0 space-y-1">
                 <p className="text-xs text-gray-700 line-clamp-2">
@@ -334,19 +327,19 @@ export function ClaudeImport({ onProgress }: Props) {
       {/* Action buttons */}
       <div className="flex gap-2">
         <button
-          onClick={handleImport}
-          disabled={state === 'importing' || selectedPairIds.size === 0}
-          className="flex-1 py-2.5 bg-notebooklm-blue text-white text-sm rounded-lg hover:bg-notebooklm-blue/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
+          onClick={handleDownload}
+          disabled={state === 'downloading' || selectedPairIds.size === 0}
+          className="flex-1 py-2.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-600/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
         >
-          {state === 'importing' ? (
+          {state === 'downloading' ? (
             <><Loader2 className="w-4 h-4 animate-spin" />{t('claude.importingBtn')}</>
           ) : (
-            <>{t('claude.importSelected', { count: selectedPairIds.size })}</>
+            <><Download className="w-4 h-4" />下载 Markdown（{selectedPairIds.size}）</>
           )}
         </button>
         <button
           onClick={handleShareCard}
-          disabled={state === 'importing' || selectedPairIds.size === 0}
+          disabled={state === 'downloading' || selectedPairIds.size === 0}
           className="py-2.5 px-4 bg-amber-500 text-white text-sm rounded-lg hover:bg-amber-500/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
           title={t('claude.shareCard')}
         >

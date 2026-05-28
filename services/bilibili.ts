@@ -9,8 +9,18 @@
  * All requests use credentials: 'include' for authenticated access.
  */
 
-import type { BilibiliVideoItem } from '@/lib/types';
-export type { BilibiliVideoItem };
+export interface BilibiliVideoItem {
+  bvid: string;
+  cid: number;
+  aid?: number;
+  title: string;
+  part?: string;
+  page: number;
+  duration?: number;
+  ownerName?: string;
+  desc?: string;
+  url?: string;
+}
 
 export interface BilibiliSourceInfo {
   bvid: string;
@@ -459,7 +469,7 @@ export async function fetchVideoSubtitle(
     // Step 4: Build Markdown
     const markdown = buildSubtitleMarkdown(
       video.title,
-      video.url,
+      video.url || `https://www.bilibili.com/video/${video.bvid}`,
       video.part,
       ownerName,
       desc,

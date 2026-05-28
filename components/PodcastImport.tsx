@@ -128,7 +128,7 @@ export function PodcastImport({ initialUrl }: Props) {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder={t('podcast.placeholder')}
-              className="w-full pl-10 pr-3 py-2 border border-gray-200/60 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-notebooklm-blue/40 focus:border-transparent placeholder:text-gray-400/70"
+              className="w-full pl-10 pr-3 py-2 border border-gray-200/60 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-600/40 focus:border-transparent placeholder:text-gray-400/70"
             />
           </div>
         </div>
@@ -141,7 +141,7 @@ export function PodcastImport({ initialUrl }: Props) {
             placeholder={t('podcast.all')}
             min={1}
             max={500}
-            className="w-16 px-2 py-1 border border-gray-200/60 rounded text-xs text-center focus:outline-none focus:ring-1 focus:ring-notebooklm-blue/40 placeholder:text-gray-400/70"
+            className="w-16 px-2 py-1 border border-gray-200/60 rounded text-xs text-center focus:outline-none focus:ring-1 focus:ring-brand-600/40 placeholder:text-gray-400/70"
           />
           <label className="text-xs text-gray-500">{t('podcast.episodes')}</label>
           <div className="flex-1" />
@@ -183,7 +183,7 @@ export function PodcastImport({ initialUrl }: Props) {
               {t('podcast.selectedEpisodes', { selected: selected.size, total: episodes.length })}
             </span>
             <div className="flex gap-2 text-xs">
-              <button onClick={selectAll} className="text-notebooklm-blue hover:underline">{t('selectAll')}</button>
+              <button onClick={selectAll} className="text-brand-600 hover:underline">{t('selectAll')}</button>
               <button onClick={selectNone} className="text-gray-400 hover:underline">{t('deselectAll')}</button>
             </div>
           </div>

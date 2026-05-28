@@ -1,7 +1,7 @@
 {
-  "name": "flow2note",
+  "name": "easynotes-ai",
   "version": "1.7.5",
-  "description": "Flow2Note - Extract subtitles & content from various sources and import to NotebookLM",
+  "description": "EasyNotes_AI - Extract subtitles & content from various sources and import to NotebookLM",
   "private": true,
   "type": "module",
   "scripts": {

@@ -208,7 +208,7 @@ const zh = {
   'claude.conversation': '对话',
   'claude.guideTitle': '如何使用',
   'claude.guideStep1': '打开 Claude、ChatGPT 或 Gemini 的对话页面',
-  'claude.guideStep2': '点击浏览器工具栏中的 Flow2Note 图标打开本面板',
+  'claude.guideStep2': '点击浏览器工具栏中的 EasyNotes_AI 图标打开本面板',
   'claude.guideStep3': '点击「提取当前对话」，选择要导入的问答对',
   'claude.guideStep4': '一键导入到 NotebookLM，AI 对话秒变知识来源',
   'claude.shareCard': '生成分享卡片',
@@ -251,7 +251,7 @@ const zh = {
   'batch.batchImport': '批量导入',
 
   // ── Onboarding ──
-  'onboarding.welcomeTitle': '欢迎使用 Flow2Note!',
+  'onboarding.welcomeTitle': '欢迎使用 EasyNotes_AI!',
   'onboarding.welcomeDesc': '将各种内容一键导入 NotebookLM。需要快速了解一下吗？',
   'onboarding.skip': '跳过',
   'onboarding.showMeAround': '开始引导',
@@ -279,8 +279,8 @@ const zh = {
   'more.ghDesc': '开源项目 · 欢迎 Star',
   'more.madeBy': 'YouTuber「小白」',
   'more.tutorial': '使用教程',
-  'more.tutorialDesc': '5 分钟上手 Flow2Note',
-  'more.rateTitle': '喜欢 Flow2Note？',
+  'more.tutorialDesc': '5 分钟上手 EasyNotes_AI',
+  'more.rateTitle': '喜欢 EasyNotes_AI？',
   'more.rateDesc': '在 Chrome 商店留下评价，帮助更多人发现我们',
   'more.rateBtn': '去评价',
   'more.settings': '设置',
@@ -524,7 +524,7 @@ const en: Record<keyof typeof zh, string> = {
   'claude.conversation': 'Conversation',
   'claude.guideTitle': 'How to use',
   'claude.guideStep1': 'Open a conversation on Claude, ChatGPT, or Gemini',
-  'claude.guideStep2': 'Click the Flow2Note icon in the toolbar to open this panel',
+  'claude.guideStep2': 'Click the EasyNotes_AI icon in the toolbar to open this panel',
   'claude.guideStep3': 'Click "Extract Current Conversation" and select Q&A pairs',
   'claude.guideStep4': 'Import to NotebookLM — turn AI chats into knowledge sources',
   'claude.shareCard': 'Share Card',
@@ -567,7 +567,7 @@ const en: Record<keyof typeof zh, string> = {
   'batch.batchImport': 'Batch Import',
 
   // ── Onboarding ──
-  'onboarding.welcomeTitle': 'Welcome to Flow2Note!',
+  'onboarding.welcomeTitle': 'Welcome to EasyNotes_AI!',
   'onboarding.welcomeDesc': 'Import content from anywhere into NotebookLM. Want a quick tour?',
   'onboarding.skip': 'Skip',
   'onboarding.showMeAround': 'Show Me Around',
@@ -595,8 +595,8 @@ const en: Record<keyof typeof zh, string> = {
   'more.ghDesc': 'Open Source · Star',
   'more.madeBy': 'YouTuber「小白」',
   'more.tutorial': 'Tutorial',
-  'more.tutorialDesc': 'Get started with Flow2Note in 5 min',
-  'more.rateTitle': 'Enjoying Flow2Note?',
+  'more.tutorialDesc': 'Get started with EasyNotes_AI in 5 min',
+  'more.rateTitle': 'Enjoying EasyNotes_AI?',
   'more.rateDesc': 'Leave a review on Chrome Web Store to help others find us',
   'more.rateBtn': 'Rate',
   'more.settings': 'Settings',
@@ -646,7 +646,7 @@ function detectLocale(): Locale {
   }
 }
 
-const STORAGE_KEY = 'flow2note_locale';
+const STORAGE_KEY = 'easynotes-ai_locale';
 
 let currentLocale: Locale | null = null;
 const listeners = new Set<() => void>();

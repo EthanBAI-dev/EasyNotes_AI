@@ -4,7 +4,7 @@ import type { ImportProgress, YouTubeResult, YouTubeVideoItem, YouTubeSourceInfo
 import { t } from '@/lib/i18n';
 import { isYouTubeUrl, parseYouTubeUrl } from '@/services/youtube';
 
-type State = 'idle' | 'loading' | 'loaded' | 'importing' | 'done' | 'error';
+type State = 'idle' | 'loading' | 'loaded' | 'downloading' | 'done' | 'error';
 
 const PAGE_SIZE = 15;
 
@@ -131,34 +131,24 @@ export function YouTubeImport({ initialUrl, onProgress, fetchTrigger }: Props) {
     }
   }, [fetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleImport = () => {
-    const toImport = videos.filter((v) => selected.has(v.id));
-    if (toImport.length === 0) { setError(t('youtube.selectAtLeastOne')); setState('error'); return; }
+  const handleDownload = async () => {
+    const toDownload = videos.filter((v) => selected.has(v.id));
+    if (toDownload.length === 0) { setError(t('youtube.selectAtLeastOne')); setState('error'); return; }
 
-    setState('importing');
-    const urls = toImport.map((v) => v.url);
+    setState('downloading');
+    const lines = ['# YouTube 视频列表', '', `**来源**: ${source?.title || 'YouTube'}`, ''];
+    for (const video of toDownload) {
+      lines.push(`- [${video.title}](${video.url})${video.publishedAt ? ` (${video.publishedAt})` : ''}`);
+    }
+    lines.push('', `共 ${toDownload.length} 个视频`);
 
-    const progress: ImportProgress = {
-      total: urls.length,
-      completed: 0,
-      items: urls.map((u) => ({ url: u, status: 'pending' })),
-    };
-    onProgress(progress);
-
-    chrome.runtime.sendMessage({ type: 'IMPORT_BATCH', urls }, (response) => {
-      onProgress(null);
-
-      if (response?.success && response.data) {
-        const result = response.data as ImportProgress;
-        const success = result.items.filter((i) => i.status === 'success').length;
-        const failed = result.items.filter((i) => i.status === 'error').length;
-        setResults({ success, failed });
-        setState('done');
-      } else {
-        setState('error');
-        setError(response?.error || t('importFailed'));
-      }
-    });
+    const markdown = lines.join('\n');
+    const filename = `${(source?.title || 'youtube_videos').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)}.md`;
+    const encoded = btoa(unescape(encodeURIComponent(markdown)));
+    const dataUrl = `data:text/markdown;base64,${encoded}`;
+    await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
+    setResults({ success: toDownload.length, failed: 0 });
+    setState('done');
   };
 
   const toggleVideo = (id: string) => {
@@ -271,21 +261,21 @@ export function YouTubeImport({ initialUrl, onProgress, fetchTrigger }: Props) {
         </div>
       )}
 
-      {/* Import Button */}
+      {/* Download Button */}
       {videos.length > 0 && (
         <button
-          onClick={handleImport}
-          disabled={selected.size === 0 || state === 'importing'}
+          onClick={handleDownload}
+          disabled={selected.size === 0 || state === 'downloading'}
           className="w-full py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
         >
-          {state === 'importing' ? (
-            <><Loader2 className="w-4 h-4 animate-spin" />{t('importing')}</>
+          {state === 'downloading' ? (
+            <><Loader2 className="w-4 h-4 animate-spin" />下载中...</>
           ) : state === 'done' ? (
             <><CheckCircle className="w-4 h-4" />{t('youtube.importDone')}</>
           ) : videos.length === 1 ? (
-            <><PlayCircle className="w-4 h-4" />{t('youtube.importThisVideo')}</>
+            <><PlayCircle className="w-4 h-4" />下载视频链接</>
           ) : (
-            <><Youtube className="w-4 h-4" />{t('youtube.importToNlm', { count: selected.size })}</>
+            <><Youtube className="w-4 h-4" />下载视频链接列表（{selected.size}）</>
           )}
         </button>
       )}

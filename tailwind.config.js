@@ -15,10 +15,10 @@ export default {
           red: '#FF0000',
           dark: '#282828',
         },
-        notebooklm: {
-          blue: '#1A73E8',
-          'blue-dark': '#1557B0',
-          light: '#E8F0FE',
+        brand: {
+          '600': '#1A73E8',
+          dark: '#1557B0',
+          '50': '#E8F0FE',
           surface: '#F8FAFF',
         },
         // Refined neutral palette

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * E2E smoke test for NotebookLM Jetpack extension.
+ * E2E smoke test for EasyNotes_AI extension.
  * Uses CDP to verify core functionality without manual popup interaction.
  *
  * Usage: node scripts/test-e2e.mjs [extensionId]
@@ -210,7 +210,7 @@ async function testNoStayOrganized() {
 // ─── Main ───
 
 async function main() {
-  console.log('🧪 NotebookLM Jetpack E2E Tests');
+  console.log('🧪 EasyNotes_AI E2E Tests');
   console.log(`   CDP: 127.0.0.1:${CDP_PORT}`);
   console.log(`   URL: ${TEST_URL}`);
 

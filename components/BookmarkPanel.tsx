@@ -15,17 +15,25 @@ import {
   ChevronUp,
   X,
   Upload,
+  Download,
 } from 'lucide-react';
 import type { ImportProgress } from '@/lib/types';
 import type { BookmarkItem } from '@/services/bookmarks';
-import type { PdfProgress } from '@/services/pdf-generator';
 import { t } from '@/lib/i18n';
+
+interface PdfProgress {
+  current: number;
+  total: number;
+  title?: string;
+  phase?: string;
+  currentPage?: number;
+}
 
 interface Props {
   onProgress: (progress: ImportProgress | null) => void;
 }
 
-type PanelState = 'idle' | 'loading' | 'importing' | 'exporting' | 'success' | 'error';
+type PanelState = 'idle' | 'loading' | 'exporting' | 'downloading' | 'success' | 'error';
 
 export function BookmarkPanel({ onProgress }: Props) {
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
@@ -59,7 +67,7 @@ export function BookmarkPanel({ onProgress }: Props) {
   const loadCurrentTab = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs[0];
-      if (tab?.url?.startsWith('http') && !/notebooklm\.google\.com/.test(tab.url)) {
+      if (tab?.url?.startsWith('http')) {
         setCurrentTabInfo({
           url: tab.url,
           title: tab.title || tab.url,
@@ -164,26 +172,26 @@ export function BookmarkPanel({ onProgress }: Props) {
     });
   };
 
-  const handleImportToNotebookLM = () => {
+  const handleExportBookmarks = async () => {
     const items = filteredBookmarks.filter((b) => selectedIds.has(b.id));
     if (items.length === 0) return;
 
-    setState('importing');
+    setState('exporting');
     setError('');
-    const urls = items.map((b) => b.url);
 
-    onProgress({ total: urls.length, completed: 0, items: urls.map((u) => ({ url: u, status: 'pending' as const })) });
+    const lines = ['# 书签导出', '', ''];
+    for (const b of items) {
+      lines.push(`- [${b.title}](${b.url})`);
+    }
+    lines.push('', `共 ${items.length} 个书签`);
 
-    chrome.runtime.sendMessage({ type: 'RESCUE_SOURCES', urls }, (resp) => {
-      onProgress(null);
-      if (resp?.success) {
-        setState('success');
-        setTimeout(() => setState('idle'), 3000);
-      } else {
-        setState('error');
-        setError(resp?.error || t('importFailed'));
-      }
-    });
+    const markdown = lines.join('\n');
+    const filename = `bookmarks_export.md`;
+    const encoded = btoa(unescape(encodeURIComponent(markdown)));
+    const dataUrl = `data:text/markdown;base64,${encoded}`;
+    await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
+    setState('success');
+    setTimeout(() => setState('idle'), 3000);
   };
 
   const toggleSelect = (id: string) => {
@@ -231,42 +239,19 @@ export function BookmarkPanel({ onProgress }: Props) {
             )}
             <span className="flex-1 text-sm text-gray-700 truncate">{currentTabInfo.title}</span>
             {isCurrentBookmarked ? (
-              <span className="flex items-center gap-1 text-xs text-notebooklm-blue bg-blue-50/80 px-2 py-1 rounded-md border border-blue-200/40">
+              <span className="flex items-center gap-1 text-xs text-brand-600 bg-blue-50/80 px-2 py-1 rounded-md border border-blue-200/40">
                 <Bookmark className="w-3 h-3 fill-current" />
                 {t('bookmark.bookmarked')}
               </span>
             ) : (
               <button
                 onClick={() => handleAddBookmark()}
-                className="btn-press flex items-center gap-1 px-3 py-1.5 bg-notebooklm-blue text-white text-xs rounded-md hover:bg-notebooklm-blue-dark transition-colors shadow-btn hover:shadow-btn-hover transition-all duration-150"
+                className="btn-press flex items-center gap-1 px-3 py-1.5 bg-brand-600 text-white text-xs rounded-md hover:bg-brand-dark transition-colors shadow-btn hover:shadow-btn-hover transition-all duration-150"
               >
                 <BookmarkPlus className="w-3 h-3" />
                 {t('bookmark.addBookmark')}
               </button>
             )}
-            <button
-              onClick={() => {
-                if (!currentTabInfo?.url) return;
-                chrome.runtime.sendMessage(
-                  { type: 'IMPORT_URL', url: currentTabInfo.url },
-                  (resp) => {
-                    if (resp?.success) {
-                      setState('success');
-                      setTimeout(() => setState('idle'), 2000);
-                    } else {
-                      setError(resp?.error || t('importFailed'));
-                      setState('error');
-                    }
-                  }
-                );
-                setState('importing');
-              }}
-              disabled={state === 'importing'}
-              className="btn-press flex items-center gap-1 px-3 py-1.5 bg-amber-500 text-white text-xs rounded-md hover:bg-amber-600 transition-colors shadow-btn hover:shadow-btn-hover transition-all duration-150"
-            >
-              {state === 'importing' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-              {t('bookmark.importNow')}
-            </button>
           </div>
         </div>
       )}
@@ -277,7 +262,7 @@ export function BookmarkPanel({ onProgress }: Props) {
           <button
             onClick={() => { setActiveCollection('all'); deselectAll(); }}
             className={`btn-press px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors ${
-              activeCollection === 'all' ? 'bg-notebooklm-blue text-white shadow-sm' : 'bg-gray-100/60 text-gray-600 hover:bg-gray-200'
+              activeCollection === 'all' ? 'bg-brand-600 text-white shadow-sm' : 'bg-gray-100/60 text-gray-600 hover:bg-gray-200'
             }`}
           >
             {t('bookmark.all')} ({bookmarks.length})
@@ -289,7 +274,7 @@ export function BookmarkPanel({ onProgress }: Props) {
                 key={col}
                 onClick={() => { setActiveCollection(col); deselectAll(); }}
                 className={`btn-press px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors ${
-                  activeCollection === col ? 'bg-notebooklm-blue text-white shadow-sm' : 'bg-gray-100/60 text-gray-600 hover:bg-gray-200'
+                  activeCollection === col ? 'bg-brand-600 text-white shadow-sm' : 'bg-gray-100/60 text-gray-600 hover:bg-gray-200'
                 }`}
               >
                 {col} ({count})
@@ -317,7 +302,7 @@ export function BookmarkPanel({ onProgress }: Props) {
             className="flex-1 px-3 py-1.5 border border-gray-200/60 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40"
             onKeyDown={(e) => { if (e.key === 'Enter') handleCreateCollection(); }}
           />
-          <button onClick={handleCreateCollection} className="btn-press px-3 py-1.5 bg-notebooklm-blue text-white text-xs rounded-lg hover:bg-notebooklm-blue-dark">
+          <button onClick={handleCreateCollection} className="btn-press px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-dark">
             {t('create')}
           </button>
           <button onClick={() => setShowNewCollection(false)} className="btn-press p-1.5 text-gray-400 hover:text-gray-600">
@@ -334,7 +319,7 @@ export function BookmarkPanel({ onProgress }: Props) {
               {selectedIds.size > 0 ? t('bookmark.selectedItems', { count: selectedIds.size }) : t('bookmark.totalItems', { count: filteredBookmarks.length })}
             </span>
             <div className="flex gap-2 text-xs">
-              <button onClick={selectAll} className="btn-press text-notebooklm-blue hover:underline">{t('selectAll')}</button>
+              <button onClick={selectAll} className="btn-press text-brand-600 hover:underline">{t('selectAll')}</button>
               <button onClick={deselectAll} className="btn-press text-gray-400 hover:underline">{t('cancel')}</button>
               {selectedIds.size > 0 && (
                 <>
@@ -366,7 +351,7 @@ export function BookmarkPanel({ onProgress }: Props) {
                   type="checkbox"
                   checked={selectedIds.has(item.id)}
                   onChange={() => toggleSelect(item.id)}
-                  className="rounded border-gray-300 text-notebooklm-blue focus:ring-blue-500"
+                  className="rounded border-gray-300 text-brand-600 focus:ring-blue-500"
                 />
                 {item.favicon && <img src={item.favicon} className="w-4 h-4 flex-shrink-0" alt="" />}
                 <div className="flex-1 min-w-0">
@@ -419,7 +404,7 @@ export function BookmarkPanel({ onProgress }: Props) {
                 <div className="flex gap-1.5">
                   <button
                     onClick={() => handleExport('pdf')}
-                    disabled={state === 'importing'}
+                    disabled={state === 'exporting'}
                     className="btn-press flex-1 py-2 bg-emerald-500 text-white text-sm rounded-lg hover:bg-emerald-500/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-btn hover:shadow-btn-hover transition-all duration-150"
                   >
                     <FileDown className="w-4 h-4" />
@@ -427,7 +412,7 @@ export function BookmarkPanel({ onProgress }: Props) {
                   </button>
                   <button
                     onClick={() => handleExport('clipboard')}
-                    disabled={state === 'importing'}
+                    disabled={state === 'exporting'}
                     className="btn-press py-2 px-2.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-500/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-btn hover:shadow-btn-hover transition-all duration-150"
                     title={t('copyToClipboard')}
                   >
@@ -437,14 +422,14 @@ export function BookmarkPanel({ onProgress }: Props) {
               )}
 
               <button
-                onClick={handleImportToNotebookLM}
-                disabled={state === 'importing' || pdfState === 'fetching' || pdfState === 'generating'}
-                className="btn-press w-full py-2 bg-notebooklm-blue text-white text-sm rounded-lg hover:bg-notebooklm-blue/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150"
+                onClick={handleExportBookmarks}
+                disabled={state === 'exporting' || pdfState === 'fetching' || pdfState === 'generating'}
+                className="btn-press w-full py-2 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-600/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150"
               >
-                {state === 'importing' ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" />{t('importing')}</>
+                {state === 'exporting' ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" />导出中...</>
                 ) : (
-                  <><BookOpen className="w-4 h-4" />{t('bookmark.importToNlm', { count: selectedIds.size })}</>
+                  <><Download className="w-4 h-4" />导出书签列表（{selectedIds.size}）</>
                 )}
               </button>
             </div>
@@ -459,15 +444,15 @@ export function BookmarkPanel({ onProgress }: Props) {
           </p>
           <div className="w-full space-y-2 text-[11px] text-gray-500 bg-white/60 rounded-lg p-3 border border-gray-100/80">
             <div className="flex items-start gap-2">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-notebooklm-blue flex items-center justify-center text-[10px] font-bold">1</span>
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-brand-600 flex items-center justify-center text-[10px] font-bold">1</span>
               <span>{t('bookmark.step1')}</span>
             </div>
             <div className="flex items-start gap-2">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-notebooklm-blue flex items-center justify-center text-[10px] font-bold">2</span>
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-brand-600 flex items-center justify-center text-[10px] font-bold">2</span>
               <span>{t('bookmark.step2')}</span>
             </div>
             <div className="flex items-start gap-2">
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-notebooklm-blue flex items-center justify-center text-[10px] font-bold">3</span>
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 text-brand-600 flex items-center justify-center text-[10px] font-bold">3</span>
               <span>{t('bookmark.step3')}</span>
             </div>
           </div>

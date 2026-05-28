@@ -33,23 +33,16 @@ export default defineConfig({
       'downloads',
       'debugger',
       'offscreen',
-      'identity',
       'sidePanel',
     ],
     host_permissions: [
-      'https://notebooklm.google.com/*',
       'https://claude.ai/*',
       'https://platform.claude.com/*',
       'https://www.youtube.com/*',
       'https://api.bilibili.com/*',
       'https://www.bilibili.com/*',
       'https://i.hdslb.com/*',
-      'https://www.googleapis.com/*',
     ],
-    oauth2: {
-      client_id: 'KAPTURE_OAUTH2_CLIENT_ID_PLACEHOLDER',
-      scopes: ['https://www.googleapis.com/auth/drive.file'],
-    },
     side_panel: {
       default_path: 'sidepanel.html',
     },

@@ -231,11 +231,11 @@ export function MorePanel({ onProgress: _onProgress }: Props) {
         }}
         className="w-full flex items-center gap-3 p-2.5 bg-blue-50/60 border border-blue-100/40 rounded-xl hover:bg-blue-100/80 transition-colors group"
       >
-        <div className="w-8 h-8 bg-notebooklm-blue rounded-lg flex items-center justify-center flex-shrink-0">
+        <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center flex-shrink-0">
           <HelpCircle className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0 text-left">
-          <p className="text-sm font-medium text-gray-800 group-hover:text-notebooklm-blue">{t('onboarding.replayTour')}</p>
+          <p className="text-sm font-medium text-gray-800 group-hover:text-brand-600">{t('onboarding.replayTour')}</p>
           <p className="text-xs text-gray-500">{t('onboarding.replayTourDesc')}</p>
         </div>
       </button>
@@ -270,8 +270,8 @@ export function MorePanel({ onProgress: _onProgress }: Props) {
           onClick={toggleAutoRename}
           role="switch"
           aria-checked={autoRename}
-          className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-notebooklm-blue/40 ${
-            autoRename ? 'bg-notebooklm-blue' : 'bg-gray-300'
+          className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-brand-600/40 ${
+            autoRename ? 'bg-brand-600' : 'bg-gray-300'
           }`}
         >
           <span
@@ -292,7 +292,7 @@ export function MorePanel({ onProgress: _onProgress }: Props) {
           <p className="text-xs text-gray-500">{t('more.rateDesc')}</p>
         </div>
         <a
-          href="https://chromewebstore.google.com/detail/notebooklm-jetpack/jgjgpfgcbdblgejodmooigkhlciejjhg/reviews"
+          href="https://github.com/crazynomad/easynotes-ai/releases"
           target="_blank"
           rel="noopener noreferrer"
           className="btn-press px-3 py-1.5 bg-amber-500 text-white text-xs font-medium rounded-lg hover:bg-amber-600 transition-colors shadow-btn hover:shadow-btn-hover flex-shrink-0"
@@ -321,7 +321,7 @@ export function MorePanel({ onProgress: _onProgress }: Props) {
             <Youtube className="w-3.5 h-3.5" />
           </a>
           <a
-            href="https://github.com/crazynomad/notebooklm-jetpack"
+            href="https://github.com/crazynomad/easynotes-ai"
             target="_blank"
             rel="noopener noreferrer"
             className="p-1 text-gray-400 hover:text-gray-800 transition-colors rounded-md hover:bg-gray-100"

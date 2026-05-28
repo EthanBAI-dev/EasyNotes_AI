@@ -183,7 +183,7 @@ export function OnboardingTour({ forceShow, onComplete }: OnboardingTourProps) {
 
       {/* Highlight border */}
       <div
-        className="absolute border-2 border-notebooklm-blue rounded-[10px] pointer-events-none transition-all duration-300 ease-spring"
+        className="absolute border-2 border-brand-600 rounded-[10px] pointer-events-none transition-all duration-300 ease-spring"
         style={{
           top: highlightStyle.top,
           left: highlightStyle.left,

@@ -1,4 +1,12 @@
-import type { HistoryItem } from '@/lib/types';
+export interface HistoryItem {
+  id: string;
+  type?: string;
+  url: string;
+  title?: string;
+  importedAt: number;
+  status: 'success' | 'error';
+  error?: string;
+}
 
 const STORAGE_KEY = 'import_history';
 const MAX_HISTORY_ITEMS = 100;

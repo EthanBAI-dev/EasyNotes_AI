@@ -1,10 +1,10 @@
-# Privacy Policy — NotebookLM Jetpack
+# Privacy Policy — EasyNotes_AI
 
 **Last updated:** February 24, 2025
 
 ## Overview
 
-NotebookLM Jetpack is a free, open-source Chrome extension that helps you import content into Google NotebookLM. We are committed to protecting your privacy.
+EasyNotes_AI is a free, open-source Chrome extension that helps you import content into Google NotebookLM. We are committed to protecting your privacy.
 
 ## Data Collection
 
@@ -70,4 +70,4 @@ https://github.com/crazynomad/notebooklm-jetpack/issues
 
 ---
 
-*Flow2Note is made by 小白*
+*EasyNotes_AI is made by 小白*
