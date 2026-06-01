@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Tv2, Loader2, CheckCircle, AlertCircle, ChevronDown, Download, User, PlayCircle, Heart, Layers, X } from 'lucide-react';
+import { Tv2, Loader2, CheckCircle, AlertCircle, ChevronDown, ChevronUp, Download, User, PlayCircle, Heart, Layers, X, Info } from 'lucide-react';
 import type { ImportProgress } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { isBilibiliUrl, parseBilibiliUrl, isBilibiliSpaceUrl, parseBilibiliSpaceUrl } from '@/services/bilibili';
@@ -70,6 +70,8 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
   const [aiPolish, setAiPolish] = useState(false);
   const [aiPromptStyle, setAiPromptStyle] = useState('smooth');
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [listHeight, setListHeight] = useState(144);
+  const [listExpanded, setListExpanded] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dlProgress, setDlProgress] = useState<{ current: number; total: number; title?: string } | null>(null);
   const abortRef = useRef<{ port?: chrome.runtime.Port; cancel: () => void }>({ cancel: () => {} });
@@ -291,15 +293,14 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
   const isWorking = state === 'loading' || state === 'downloading' || state === 'fetching';
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
+      {/* Input */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
           <Tv2 className="w-4 h-4 text-[#00a1d6]" />
           {t('bilibili.link')}
         </label>
-      </div>
-
-      <div className="flex gap-2">
+        <div className="flex gap-2">
         <div className="flex-1 flex items-stretch" ref={dropdownRef}>
           <div className="relative flex-shrink-0">
             <button
@@ -361,67 +362,113 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
           )}
         </button>
       </div>
+      </div>
 
+      {/* Video Info */}
       {source && (
-        <div className="bg-sky-50 border border-sky-100/60 rounded-lg p-3 flex items-center gap-3 shadow-soft">
-          <div className="w-10 h-10 rounded-lg bg-[#00a1d6]/10 flex items-center justify-center flex-shrink-0">
-            <Tv2 className="w-5 h-5 text-[#00a1d6]" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-sky-900 truncate">{source.title}</p>
-            <p className="text-xs text-sky-600">
-              {source.owner && <span className="mr-2">UP主：{source.owner}</span>}
-              {source.type === 'series' ? (
-                <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold mr-2">合集</span>
-              ) : source.isSeries && videos.length > 1 ? (
-                <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-bold mr-2">分P</span>
-              ) : null}
-              <span className="font-mono tabular-nums">{source.videoCount}</span> {source.isSeries ? t('bilibili.parts') : t('bilibili.singleVideo')}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {videos.length > 1 && (
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600">
-              {t('bilibili.selectedParts', { selected: selected.size, total: displayedVideos.length })}
-            </span>
-            <div className="flex gap-2 text-xs">
-              <button onClick={selectAll} className="text-[#00a1d6] hover:underline">{t('selectAll')}</button>
-              <button onClick={selectNone} className="text-gray-400 hover:underline">{t('deselectAll')}</button>
+          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
+            <Info className="w-4 h-4 text-[#00a1d6]" />
+            {t('bilibili.videoInfo')}
+          </label>
+          <div className="border border-sky-100/60 rounded-lg overflow-hidden shadow-soft">
+            <div className="bg-sky-50 p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-[#00a1d6]/10 flex items-center justify-center flex-shrink-0">
+                <Tv2 className="w-5 h-5 text-[#00a1d6]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-sky-900 truncate">{source.title}</p>
+                <p className="text-xs text-sky-600">
+                  {source.owner && <span className="mr-2">UP主：{source.owner}</span>}
+                  {source.type === 'series' ? (
+                    <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold mr-2">合集</span>
+                  ) : source.isSeries && videos.length > 1 ? (
+                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-bold mr-2">分P</span>
+                  ) : null}
+                  <span className="font-mono tabular-nums">{source.videoCount}</span> {source.isSeries ? t('bilibili.parts') : t('bilibili.singleVideo')}
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="max-h-36 overflow-y-auto border border-border-strong rounded-lg shadow-soft">
-            {displayedVideos.map((video) => {
-              const key = videoKey(video);
-              return (
-                <label
-                  key={key}
-                  className="flex items-start gap-3 p-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors duration-150"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected.has(key)}
-                    onChange={() => toggleVideo(key)}
-                    className="mt-1 rounded border-gray-300 text-[#00a1d6] focus:ring-[#00a1d6]"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-700 line-clamp-1">
-                      <span className="text-gray-400 mr-1">P{video.page}</span>
-                      {video.part || video.title}
-                    </p>
-                    {video.duration && (
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {Math.floor(video.duration / 60)}:{String(video.duration % 60).padStart(2, '0')}
-                      </p>
-                    )}
+
+            {videos.length > 1 && (
+              <>
+                <div className="flex items-center justify-between px-3 py-1.5 bg-white border-t border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setListExpanded(!listExpanded)}
+                      className="text-xs text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-0.5"
+                    >
+                      {listExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      {listExpanded ? '收起' : '展开'}
+                    </button>
+                    <span className="text-xs text-gray-500">
+                      {t('bilibili.selectedParts', { selected: selected.size, total: displayedVideos.length })}
+                    </span>
                   </div>
-                </label>
-              );
-            })}
+                  <div className="flex gap-2 text-xs">
+                    <button onClick={selectAll} className="text-[#00a1d6] hover:underline">{t('selectAll')}</button>
+                    <button onClick={selectNone} className="text-gray-400 hover:underline">{t('deselectAll')}</button>
+                  </div>
+                </div>
+                {listExpanded && (
+                  <>
+                    <div
+                      className="overflow-y-auto bg-white"
+                      style={{ maxHeight: listHeight }}
+                    >
+                      {displayedVideos.map((video) => {
+                        const key = videoKey(video);
+                        return (
+                          <label
+                            key={key}
+                            className="flex items-start gap-3 p-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors duration-150"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected.has(key)}
+                              onChange={() => toggleVideo(key)}
+                              className="mt-1 rounded border-gray-300 text-[#00a1d6] focus:ring-[#00a1d6]"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-gray-700 line-clamp-1">
+                                <span className="text-gray-400 mr-1">P{video.page}</span>
+                                {video.part || video.title}
+                              </p>
+                              {video.duration && (
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  {Math.floor(video.duration / 60)}:{String(video.duration % 60).padStart(2, '0')}
+                                </p>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div
+                      className="flex items-center justify-center h-3 bg-gray-50 border-t border-gray-100 cursor-ns-resize hover:bg-gray-100 transition-colors group"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        const startY = e.clientY;
+                        const startH = listHeight;
+                        const onMove = (ev: MouseEvent) => {
+                          setListHeight(Math.max(60, Math.min(600, startH + (ev.clientY - startY))));
+                        };
+                        const onUp = () => {
+                          document.removeEventListener('mousemove', onMove);
+                          document.removeEventListener('mouseup', onUp);
+                        };
+                        document.addEventListener('mousemove', onMove);
+                        document.addEventListener('mouseup', onUp);
+                      }}
+                    >
+                      <div className="w-8 h-0.5 rounded-full bg-gray-300 group-hover:bg-gray-400 transition-colors" />
+                    </div>
+                  </>
+                )}
+              </>
+            )}
           </div>
+
           {canLoadMore && (
             <button
               onClick={() => setDisplayCount(c => Math.min(c + PAGE_SIZE, videos.length))}
@@ -435,7 +482,10 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
 
       {videos.length > 0 && (
         <div className="space-y-3">
-          <p className="text-xs text-gray-500">{t('bilibili.outputType')}</p>
+          <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
+            <Download className="w-4 h-4 text-[#00a1d6]" />
+            {t('bilibili.outputType')}
+          </label>
           <div className="flex items-center gap-1.5">
             <div className="flex rounded-lg border border-gray-200/60 overflow-hidden">
               <button
@@ -483,7 +533,7 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
 
           {aiPolish && (
             <div>
-              <p className="text-[11px] text-gray-500 mb-1.5">{t('bilibili.promptStyle')}</p>
+              <p className="text-xs font-medium text-gray-600 mb-1.5">{t('bilibili.promptStyle')}</p>
               <div className="flex flex-wrap gap-1.5">
                 {PROMPT_STYLES.map((style) => (
                   <button

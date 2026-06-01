@@ -458,8 +458,8 @@ export async function polishSubtitlesWithChunks(
   const settings = await getSettings();
   const ai = settings.ai;
 
-  if (!ai?.enabled || !ai?.apiKey || !ai?.provider) {
-    return { success: false, polished: text, error: 'AI 润色未配置，请在"更多"标签页中设置' };
+  if (!ai?.apiKey || !ai?.provider) {
+    return { success: false, polished: text, error: 'AI 总结未配置，请在设置中配置 API Key' };
   }
 
   const provider = ai.provider;

@@ -83,6 +83,7 @@ const zh = {
 
   // ── BilibiliSummary ──
   'bilibili.link': '哔哩哔哩 链接',
+  'bilibili.videoInfo': '视频信息',
   'bilibili.enterLink': '请输入哔哩哔哩视频链接',
   'bilibili.unrecognized': '无法识别的链接，请输入 bilibili.com/video/BVxxx 格式的链接',
   'bilibili.fetchFailed': '获取视频信息失败',
@@ -143,6 +144,7 @@ const zh = {
 
   // ── YouTubeSummary ──
   'youtube.link': 'YouTube 链接',
+  'youtube.videoInfo': '视频信息',
   'youtube.enterLink': '请输入 YouTube 链接',
   'youtube.unrecognized': '无法识别的链接，支持视频、播放列表和频道链接',
   'youtube.fetchFailed': '获取视频列表失败',
@@ -416,6 +418,7 @@ const en: Record<keyof typeof zh, string> = {
 
   // ── BilibiliSummary ──
   'bilibili.link': 'Bilibili Link',
+  'bilibili.videoInfo': 'Video Info',
   'bilibili.enterLink': 'Please enter a Bilibili video link',
   'bilibili.unrecognized': 'Unrecognized link. Please use a bilibili.com/video/BVxxx format URL.',
   'bilibili.fetchFailed': 'Failed to fetch video info',
@@ -476,6 +479,7 @@ const en: Record<keyof typeof zh, string> = {
 
   // ── YouTubeSummary ──
   'youtube.link': 'YouTube Link',
+  'youtube.videoInfo': 'Video Info',
   'youtube.enterLink': 'Please enter a YouTube link',
   'youtube.unrecognized': 'Unrecognized link. Supports video, playlist, and channel URLs.',
   'youtube.fetchFailed': 'Failed to fetch video list',

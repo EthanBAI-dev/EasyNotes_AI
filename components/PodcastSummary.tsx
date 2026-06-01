@@ -125,7 +125,7 @@ export function PodcastSummary({ initialUrl }: Props) {
   const selectNone = () => setSelected(new Set());
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Input */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">

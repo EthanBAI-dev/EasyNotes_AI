@@ -27,7 +27,6 @@ interface Props {
 export function MorePanel({ onProgress: _onProgress }: Props) {
   const [autoRename, setAutoRename] = useState(true);
   const [showAIPolish, setShowAIPolish] = useState(false);
-  const [aiEnabled, setAiEnabled] = useState(false);
   const [aiProvider, setAiProvider] = useState('deepseek');
   const [aiApiKey, setAiApiKey] = useState('');
   const [aiModel, setAiModel] = useState('');
@@ -38,7 +37,6 @@ export function MorePanel({ onProgress: _onProgress }: Props) {
   useEffect(() => {
     getSettings().then((s) => {
       setAutoRename(s.autoRenamePastedSources);
-      setAiEnabled(s.ai.enabled);
       setAiProvider(s.ai.provider);
       setAiApiKey(s.ai.apiKey);
       setAiModel(s.ai.model);
@@ -55,7 +53,7 @@ export function MorePanel({ onProgress: _onProgress }: Props) {
 
   const saveAISetting = async (key: string, value: unknown) => {
     const patch: Record<string, unknown> = { [key]: value };
-    await updateSettings({ ai: { enabled: aiEnabled, provider: aiProvider, apiKey: aiApiKey, model: aiModel, promptStyle: aiPromptStyle, customPrompt: aiCustomPrompt, ...patch } as any });
+    await updateSettings({ ai: { enabled: true, provider: aiProvider, apiKey: aiApiKey, model: aiModel, promptStyle: aiPromptStyle, customPrompt: aiCustomPrompt, ...patch } as any });
   };
 
   const models = PROVIDER_MODELS[aiProvider] || [];
@@ -77,40 +75,16 @@ export function MorePanel({ onProgress: _onProgress }: Props) {
 
         {showAIPolish && (
           <div className="p-3 space-y-3 border-t border-gray-200">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-700">{t('more.aiEnable')}</span>
-              <button
-                onClick={async () => {
-                  const next = !aiEnabled;
-                  setAiEnabled(next);
-                  await saveAISetting('enabled', next);
-                }}
-                role="switch"
-                aria-checked={aiEnabled}
-                className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500/40 ${
-                  aiEnabled ? 'bg-purple-500' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
-                    aiEnabled ? 'translate-x-4' : 'translate-x-0.5'
-                  }`}
-                />
-              </button>
-            </div>
-
-            {aiEnabled && (
-              <>
-                {/* Provider */}
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">{t('more.aiProvider')}</label>
-                  <select
+            {/* Provider */}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">{t('more.aiProvider')}</label>
+              <select
                     value={aiProvider}
                     onChange={async (e) => {
                       setAiProvider(e.target.value);
                       setAiModel('');
                       await saveAISetting('provider', e.target.value);
-                      await updateSettings({ ai: { enabled: aiEnabled, provider: e.target.value, apiKey: aiApiKey, model: '', promptStyle: aiPromptStyle, customPrompt: aiCustomPrompt } as any });
+                      await updateSettings({ ai: { enabled: true, provider: e.target.value, apiKey: aiApiKey, model: '', promptStyle: aiPromptStyle, customPrompt: aiCustomPrompt } as any });
                     }}
                     className="w-full text-sm border border-gray-200/60 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500/40"
                   >
@@ -217,8 +191,6 @@ export function MorePanel({ onProgress: _onProgress }: Props) {
                 <p className="text-[10px] text-gray-400 leading-relaxed">
                   {t('more.aiPolishNote')}
                 </p>
-              </>
-            )}
           </div>
         )}
       </div>
