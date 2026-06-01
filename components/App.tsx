@@ -1,19 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
-import { MessageCircle, Headphones, MoreHorizontal, Youtube, Tv2, RefreshCw } from 'lucide-react';
+import { MessageCircle, Headphones, MoreHorizontal, Youtube, Tv2, RefreshCw, ChevronDown, ChevronUp, Settings } from 'lucide-react';
 import type { ImportProgress } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { Locale } from '@/lib/i18n';
-import { PodcastImport } from '@/components/PodcastImport';
-import { ClaudeImport } from '@/components/ClaudeImport';
-import { YouTubeImport } from '@/components/YouTubeImport';
-import { BilibiliImport } from '@/components/BilibiliImport';
+import { PodcastSummary } from '@/components/PodcastSummary';
+import { AISummary } from '@/components/AISummary';
+import { YouTubeSummary } from '@/components/YouTubeSummary';
+import { BilibiliSummary } from '@/components/BilibiliSummary';
 import { getOpState } from '@/services/op-state';
 import { LayersIcon } from '@/components/LayersIcon';
 import { MorePanel } from '@/components/MorePanel';
 import { BookmarkPanel } from '@/components/BookmarkPanel';
 import { OnboardingTour } from '@/components/OnboardingTour';
+import { MediaDropdown } from '@/components/MediaDropdown';
 
 export default function App() {
   const { t, locale, setLocale } = useI18n();
@@ -114,43 +115,75 @@ export default function App() {
 
       <Tabs.Root value={activeTab} onValueChange={handleTabChange} className="flex flex-col">
         <Tabs.List className="flex glass border-b border-border px-2 gap-0.5" data-tour="tab-list">
-          {[
-            { value: 'bilibili', icon: Tv2, label: t('app.tabBilibili') },
-            { value: 'youtube', icon: Youtube, label: t('app.tabYouTube') },
-            { value: 'podcast', icon: Headphones, label: t('app.tabPodcast') },
-            { value: 'bookmark', icon: LayersIcon, label: t('app.tabBookmarks') },
-            { value: 'claude', icon: MessageCircle, label: t('app.tabAI') },
-            { value: 'more', icon: MoreHorizontal, label: t('app.tabMore') },
-          ].map(({ value, icon: Icon, label }) => (
-            <Tabs.Trigger
-              key={value}
-              value={value}
-              data-tour={`tab-${value}`}
-              className={cn(
-                'flex-1 py-2 text-[11px] font-medium text-gray-400',
-                'flex flex-col items-center gap-0.5 relative',
-                'border-b-2 border-transparent',
-                'hover:text-gray-500',
-                'transition-all duration-200 ease-spring',
-                'data-[state=active]:text-blue-600 data-[state=active]:border-blue-600',
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </Tabs.Trigger>
-          ))}
+          {/* Media Dropdown */}
+          <MediaDropdown 
+            activeTab={activeTab}
+            onTabChange={handleTabChange}
+            t={t}
+          />
+          
+          {/* Web Tab */}
+          <Tabs.Trigger
+            value="bookmark"
+            data-tour="tab-bookmark"
+            className={cn(
+              'flex-1 py-2 text-[11px] font-medium text-gray-400',
+              'flex flex-col items-center gap-0.5 relative',
+              'border-b-2 border-transparent',
+              'hover:text-gray-500',
+              'transition-all duration-200 ease-spring',
+              'data-[state=active]:text-blue-600 data-[state=active]:border-blue-600',
+            )}
+          >
+            <LayersIcon className="w-4 h-4" />
+            {t('app.tabWeb')}
+          </Tabs.Trigger>
+          
+          {/* AI Chat Tab */}
+          <Tabs.Trigger
+            value="claude"
+            data-tour="tab-claude"
+            className={cn(
+              'flex-1 py-2 text-[11px] font-medium text-gray-400',
+              'flex flex-col items-center gap-0.5 relative',
+              'border-b-2 border-transparent',
+              'hover:text-gray-500',
+              'transition-all duration-200 ease-spring',
+              'data-[state=active]:text-blue-600 data-[state=active]:border-blue-600',
+            )}
+          >
+            <MessageCircle className="w-4 h-4" />
+            {t('app.tabAIChat')}
+          </Tabs.Trigger>
+
+          {/* Settings Tab */}
+          <Tabs.Trigger
+            value="more"
+            data-tour="tab-more"
+            className={cn(
+              'flex-1 py-2 text-[11px] font-medium text-gray-400',
+              'flex flex-col items-center gap-0.5 relative',
+              'border-b-2 border-transparent',
+              'hover:text-gray-500',
+              'transition-all duration-200 ease-spring',
+              'data-[state=active]:text-blue-600 data-[state=active]:border-blue-600',
+            )}
+          >
+            <Settings className="w-4 h-4" />
+            {t('app.tabMore')}
+          </Tabs.Trigger>
         </Tabs.List>
 
         <Tabs.Content value="bilibili" className="p-4 animate-fade-in">
-          <BilibiliImport initialUrl={initialBilibiliUrl} onProgress={setImportProgress} fetchTrigger={fetchTrigger} />
+          <BilibiliSummary initialUrl={initialBilibiliUrl} onProgress={setImportProgress} fetchTrigger={fetchTrigger} />
         </Tabs.Content>
 
         <Tabs.Content value="youtube" className="p-4 animate-fade-in">
-          <YouTubeImport initialUrl={initialYouTubeUrl} onProgress={setImportProgress} fetchTrigger={fetchTrigger} />
+          <YouTubeSummary initialUrl={initialYouTubeUrl} onProgress={setImportProgress} fetchTrigger={fetchTrigger} />
         </Tabs.Content>
 
         <Tabs.Content value="podcast" className="p-4 animate-fade-in">
-          <PodcastImport initialUrl={initialPodcastUrl} />
+          <PodcastSummary initialUrl={initialPodcastUrl} />
         </Tabs.Content>
 
         <Tabs.Content value="bookmark" className="p-4 animate-fade-in">
@@ -158,7 +191,7 @@ export default function App() {
         </Tabs.Content>
 
         <Tabs.Content value="claude" className="p-4 animate-fade-in">
-          <ClaudeImport onProgress={setImportProgress} />
+          <AISummary onProgress={setImportProgress} />
         </Tabs.Content>
 
         <Tabs.Content value="more" className="p-4 animate-fade-in">

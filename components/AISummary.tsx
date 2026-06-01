@@ -52,13 +52,14 @@ function stripMarkdown(md: string): string {
     .trim();
 }
 
-export function ClaudeImport({ onProgress }: Props) {
+export function AISummary({ onProgress }: Props) {
   const [state, setState] = useState<ImportState>('idle');
   const [error, setError] = useState('');
   const [conversation, setConversation] = useState<ClaudeConversation | null>(null);
   const [selectedPairIds, setSelectedPairIds] = useState<Set<string>>(new Set());
   const [platformInfo, setPlatformInfo] = useState<ReturnType<typeof detectPlatform>>(null);
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
+  const [aiPolish, setAiPolish] = useState(false);
 
   const [autoExtracted, setAutoExtracted] = useState(false);
 
@@ -140,7 +141,29 @@ export function ClaudeImport({ onProgress }: Props) {
       lines.push('---', '');
     }
 
-    const markdown = lines.join('\n');
+    let markdown = lines.join('\n');
+    
+    if (aiPolish) {
+      try {
+        const { polishSubtitlesWithChunks } = await import('@/services/ai-polish');
+        const polished = await polishSubtitlesWithChunks(markdown, undefined, (current, total) => {
+          console.log(`AI 润色进度: ${current}/${total}`);
+        });
+        
+        if (polished.success) {
+          markdown = polished.polished;
+        } else {
+          setState('error');
+          setError(polished.error || 'AI 润色失败');
+          return;
+        }
+      } catch (err) {
+        setState('error');
+        setError(err instanceof Error ? err.message : 'AI 润色处理失败');
+        return;
+      }
+    }
+
     const filename = `${conversation.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)}.md`;
     const encoded = btoa(unescape(encodeURIComponent(markdown)));
     const dataUrl = `data:text/markdown;base64,${encoded}`;
@@ -324,6 +347,21 @@ export function ClaudeImport({ onProgress }: Props) {
         ))}
       </div>
 
+      {/* AI Polish toggle */}
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] text-gray-500">{t('youtube.aiPolish')}</span>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={aiPolish}
+            onChange={(e) => setAiPolish(e.target.checked)}
+            className="sr-only peer"
+          />
+          <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-brand-600/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+        </label>
+        <div className="flex-1" />
+      </div>
+
       {/* Action buttons */}
       <div className="flex gap-2">
         <button
@@ -334,7 +372,7 @@ export function ClaudeImport({ onProgress }: Props) {
           {state === 'downloading' ? (
             <><Loader2 className="w-4 h-4 animate-spin" />{t('claude.importingBtn')}</>
           ) : (
-            <><Download className="w-4 h-4" />下载 Markdown（{selectedPairIds.size}）</>
+            <><Download className="w-4 h-4" />{aiPolish ? '下载润色版' : '下载 Markdown'}（{selectedPairIds.size}）</>
           )}
         </button>
         <button

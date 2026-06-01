@@ -89,18 +89,17 @@ async function getYouTubeTab(): Promise<{ tabId: number; createdByUs: boolean }>
       return { tabId: userTab.id, createdByUs: false };
     }
 
-    // Create a hidden inactive tab
-    const created = await chrome.tabs.create({
-      url: 'https://www.youtube.com/',
-      active: false,
-    });
-    if (created.id === undefined) {
-      throw new Error('Failed to create youtube.com tab');
+    // No existing tab — shortcut: if we have a youtube.com active tab, use it
+    const allTabs = await chrome.tabs.query({});
+    const anyYoutubeTab = allTabs.find(t => t.url?.startsWith('https://www.youtube.com/') && t.id !== undefined);
+    if (anyYoutubeTab?.id !== undefined) {
+      cachedTabId = anyYoutubeTab.id;
+      cachedTabCreatedByUs = false;
+      return { tabId: anyYoutubeTab.id, createdByUs: false };
     }
-    await waitForTabComplete(created.id);
-    cachedTabId = created.id;
-    cachedTabCreatedByUs = true;
-    return { tabId: created.id, createdByUs: true };
+
+    // No YouTube tab anywhere — DO NOT create one; that would pop up a visible tab
+    throw new Error('No YouTube tab available — please open a YouTube page first');
   })();
 
   try {

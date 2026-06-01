@@ -1,6 +1,6 @@
 import { parseRssFeed } from '@/services/rss-parser';
 import { fetchPodcast, sanitizeFilename, buildFilename } from '@/services/podcast';
-import { fetchYouTube, fetchYouTubeMore } from '@/services/youtube';
+import { fetchYouTube, fetchYouTubeMore, fetchYouTubeTranscript } from '@/services/youtube';
 import {
   fetchBilibiliVideo,
   fetchVideoSubtitle,
@@ -102,7 +102,7 @@ export default defineBackground(() => {
       port.onMessage.addListener(async (msg) => {
         if (msg.type !== 'BILIBILI_DOWNLOAD_SEPARATE' && msg.type !== 'BILIBILI_DOWNLOAD_MERGED') return;
 
-        const { videos, ownerName, desc, source, aiPolish } = msg as any;
+        const { videos, ownerName, desc, source, aiPolish, promptStyle } = msg as any;
         const isMerged = msg.type === 'BILIBILI_DOWNLOAD_MERGED';
 
         await setOpState({
@@ -136,7 +136,7 @@ export default defineBackground(() => {
               const allBodies = results.flatMap(r => (r as any).rawBody || []);
               const polished = await polishSubtitlesWithChunks(mergedMd, allBodies.length > 0 ? allBodies : undefined, (c, t) => {
                 sendProgress({ phase: 'polishing', current: c, total: t, title: `AI 润色 ${c}/${t}` });
-              });
+              }, promptStyle);
               if (!polished.success && polished.error) {
                 sendProgress({ phase: 'error', error: `AI 润色失败：${polished.error}，请稍后重试` });
                 clearOpState();
@@ -162,7 +162,7 @@ export default defineBackground(() => {
                 if (aiPolish) {
                   const polished = await polishSubtitlesWithChunks(markdown, result.rawBody, (c, t) => {
                     sendProgress({ phase: 'polishing', current: c, total: t, title: `${video.part || video.title} ${c}/${t}` });
-                  });
+                  }, promptStyle);
                   if (!polished.success && polished.error) {
                     sendProgress({ phase: 'error', error: `AI 润色失败：${polished.error}，请稍后重试` });
                     clearOpState();
@@ -179,6 +179,117 @@ export default defineBackground(() => {
               }
               if (i < videos.length - 1) {
                 await new Promise(r => setTimeout(r, 1500));
+              }
+            }
+            sendProgress({ phase: 'done', downloaded, skipped });
+            clearOpState();
+          }
+        } catch (err) {
+          sendProgress({ phase: 'error', error: String(err) });
+          clearOpState();
+        }
+      });
+      return;
+    }
+
+    if (port.name === 'youtube-download') {
+      port.onMessage.addListener(async (msg) => {
+        if (msg.type !== 'YOUTUBE_DOWNLOAD_SEPARATE' && msg.type !== 'YOUTUBE_DOWNLOAD_MERGED') return;
+
+        const { videos, source, aiPolish, promptStyle } = msg as any;
+        const isMerged = msg.type === 'YOUTUBE_DOWNLOAD_MERGED';
+
+        await setOpState({
+          active: true,
+          phase: 'downloading',
+          kind: 'export',
+          current: 0,
+          total: videos.length,
+          title: videos[0]?.title || '',
+          timestamp: Date.now(),
+        });
+
+        const sendProgress = (data: Record<string, unknown>) => {
+          try { port.postMessage(data); } catch { /* disconnected */ }
+        };
+
+        try {
+          if (isMerged) {
+            const results: { video: any; markdown: string; rawLines: any[] }[] = [];
+            for (let i = 0; i < videos.length; i++) {
+              const video = videos[i];
+              sendProgress({ phase: 'downloading', current: i + 1, total: videos.length, title: video.title });
+              const transcript = await fetchYouTubeTranscript(video.id);
+              if (transcript.success) {
+                results.push({ video, markdown: transcript.markdown, rawLines: transcript.lines });
+              }
+              if (i < videos.length - 1) {
+                await new Promise(r => setTimeout(r, 2000));
+              }
+            }
+
+            if (results.length === 0) {
+              sendProgress({ phase: 'error', error: '所有视频均无字幕' });
+              clearOpState();
+              return;
+            }
+
+            const mergedLines: string[] = [];
+            mergedLines.push(`# ${source?.title || 'YouTube 合集'}`, '', `**来源**: YouTube`, '');
+            for (const r of results) {
+              mergedLines.push('---', '', `## ${r.video.title}`, '', r.markdown, '');
+            }
+
+            let mergedMd = mergedLines.join('\n');
+            if (aiPolish) {
+              const allLines = results.flatMap(r => r.rawLines);
+              const polished = await polishSubtitlesWithChunks(mergedMd, allLines.length > 0 ? allLines : undefined, (c, t) => {
+                sendProgress({ phase: 'polishing', current: c, total: t, title: `AI 润色 ${c}/${t}` });
+              }, promptStyle);
+              if (!polished.success && polished.error) {
+                sendProgress({ phase: 'error', error: `AI 润色失败：${polished.error}` });
+                clearOpState();
+                return;
+              }
+              if (polished.success) mergedMd = polished.polished;
+            }
+
+            const sourceName = (source?.title || 'youtube_collection').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
+            const filename = `${sourceName}_合并字幕.md`;
+            const encoded = btoa(unescape(encodeURIComponent(mergedMd)));
+            const dataUrl = `data:text/markdown;base64,${encoded}`;
+            await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
+            sendProgress({ phase: 'done' });
+            clearOpState();
+          } else {
+            let downloaded = 0; let skipped = 0;
+            for (let i = 0; i < videos.length; i++) {
+              const video = videos[i];
+              sendProgress({ phase: 'downloading', current: i + 1, total: videos.length, title: video.title });
+              const transcript = await fetchYouTubeTranscript(video.id);
+              if (!transcript.success) { skipped++; }
+              else {
+                let markdown = transcript.markdown;
+                if (aiPolish) {
+                  const polished = await polishSubtitlesWithChunks(markdown, transcript.lines, (c, t) => {
+                    sendProgress({ phase: 'polishing', current: c, total: t, title: `${video.title} ${c}/${t}` });
+                  }, promptStyle);
+                  if (!polished.success && polished.error) {
+                    sendProgress({ phase: 'error', error: `AI 润色失败：${polished.error}` });
+                    clearOpState();
+                    return;
+                  }
+                  if (polished.success) markdown = polished.polished;
+                }
+                const safeTitle = video.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
+                const filename = `${safeTitle}.md`;
+                const encoded = btoa(unescape(encodeURIComponent(markdown)));
+                const dataUrl = `data:text/markdown;base64,${encoded}`;
+                await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
+                downloaded++;
+              }
+              if (i < videos.length - 1) {
+                await new Promise(r => setTimeout(r, 2000));
               }
             }
             sendProgress({ phase: 'done', downloaded, skipped });
@@ -307,6 +418,9 @@ async function handleMessage(message: MessageType): Promise<unknown> {
 
     case 'FETCH_YOUTUBE_MORE':
       return await fetchYouTubeMore(message.continuation);
+
+    case 'FETCH_YOUTUBE_TRANSCRIPT':
+      return await fetchYouTubeTranscript(message.videoId);
 
     case 'EXPORT_PDF':
     case 'DOWNLOAD_PODCAST':

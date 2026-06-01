@@ -38,7 +38,7 @@ notebooklm-jetpack/
 │   ├── PlaylistImport.tsx         # YouTube 播放列表导入 (324行) - 需订阅验证
 │   ├── RssImport.tsx              # RSS 源导入 (231行)
 │   ├── DocsImport.tsx             # 文档站点分析+导入 (299行)
-│   ├── ClaudeImport.tsx           # Claude 对话提取+导入 (311行)
+│   ├── AISummary.tsx              # AI 对话提取+总结 (311行)
 │   └── HistoryPanel.tsx           # 导入历史记录 (151行)
 │
 ├── services/                      # 业务逻辑层

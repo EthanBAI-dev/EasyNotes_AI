@@ -48,6 +48,7 @@ export function BookmarkPanel({ onProgress }: Props) {
   const [newCollectionName, setNewCollectionName] = useState('');
   const [pdfState, setPdfState] = useState<'idle' | 'fetching' | 'generating' | 'done' | 'copied'>('idle');
   const [pdfProgress, setPdfProgress] = useState<PdfProgress | null>(null);
+  const [aiPolish, setAiPolish] = useState(false);
 
   // Load bookmarks and current tab info
   useEffect(() => {
@@ -185,7 +186,29 @@ export function BookmarkPanel({ onProgress }: Props) {
     }
     lines.push('', `共 ${items.length} 个书签`);
 
-    const markdown = lines.join('\n');
+    let markdown = lines.join('\n');
+    
+    if (aiPolish) {
+      try {
+        const { polishSubtitlesWithChunks } = await import('@/services/ai-polish');
+        const polished = await polishSubtitlesWithChunks(markdown, undefined, (current, total) => {
+          console.log(`AI 润色进度: ${current}/${total}`);
+        });
+        
+        if (polished.success) {
+          markdown = polished.polished;
+        } else {
+          setState('error');
+          setError(polished.error || 'AI 润色失败');
+          return;
+        }
+      } catch (err) {
+        setState('error');
+        setError(err instanceof Error ? err.message : 'AI 润色处理失败');
+        return;
+      }
+    }
+
     const filename = `bookmarks_export.md`;
     const encoded = btoa(unescape(encodeURIComponent(markdown)));
     const dataUrl = `data:text/markdown;base64,${encoded}`;
@@ -385,6 +408,21 @@ export function BookmarkPanel({ onProgress }: Props) {
           {/* Action buttons */}
           {selectedIds.size > 0 && (
             <div className="space-y-2">
+              {/* AI Polish toggle */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-gray-500">{t('youtube.aiPolish')}</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={aiPolish}
+                    onChange={(e) => setAiPolish(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-brand-600/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+                </label>
+                <div className="flex-1" />
+              </div>
+
               {pdfState === 'fetching' || pdfState === 'generating' ? (
                 <button
                   disabled
@@ -429,7 +467,7 @@ export function BookmarkPanel({ onProgress }: Props) {
                 {state === 'exporting' ? (
                   <><Loader2 className="w-4 h-4 animate-spin" />导出中...</>
                 ) : (
-                  <><Download className="w-4 h-4" />导出书签列表（{selectedIds.size}）</>
+                  <><Download className="w-4 h-4" />{aiPolish ? '导出润色版' : '导出书签列表'}（{selectedIds.size}）</>
                 )}
               </button>
             </div>

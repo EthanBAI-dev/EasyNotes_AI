@@ -78,16 +78,17 @@ interface Chunk {
  * 气泡标签 & 描述定义在文件末尾的 PROMPT_STYLES 导出中，只影响 UI 显示。
  * ============================================================================
  */
-async function buildSystemPrompt(): Promise<string> {
+async function buildSystemPrompt(overrideStyle?: string): Promise<string> {
   const settings = await getSettings();
   const ai = settings.ai;
 
-  if (ai.customPrompt) return ai.customPrompt;
+  const style = overrideStyle || ai.promptStyle || 'smooth';
+    if (style === 'custom' && ai.customPrompt) return ai.customPrompt;
+    if (!overrideStyle && ai.customPrompt) return ai.customPrompt;
 
-  const basePrompt = '你是一位严谨的文字编辑校对专家。你的任务是将语音识别（ASR）生成的字幕文本进行标点补全、错别字修正、段落划分，以提升易读性。';
+    const basePrompt = '你是一位严谨的文字编辑校对专家。你的任务是将语音识别（ASR）生成的字幕文本进行标点补全、错别字修正、段落划分，以提升易读性。';
 
-  const style = ai.promptStyle || 'smooth';
-  const stylePrompts: Record<string, string> = {
+    const stylePrompts: Record<string, string> = {
     smooth: [
       '补全标点符号，使语句更流畅自然',
       '修正明显的错别字和语法错误',
@@ -452,12 +453,13 @@ export async function polishSubtitlesWithChunks(
   text: string,
   subtitleLines?: SubtitleLine[],
   onProgress?: (current: number, total: number) => void,
+  overrideStyle?: string,
 ): Promise<AIPolishResult> {
   const settings = await getSettings();
   const ai = settings.ai;
 
   if (!ai?.enabled || !ai?.apiKey || !ai?.provider) {
-    return { success: false, polished: text, error: 'AI 润色未配置，请在“更多”标签页中设置' };
+    return { success: false, polished: text, error: 'AI 润色未配置，请在"更多"标签页中设置' };
   }
 
   const provider = ai.provider;
@@ -467,7 +469,7 @@ export async function polishSubtitlesWithChunks(
   }
 
   const model = ai.model || DEFAULT_MODELS[provider] || '';
-  const systemPrompt = await buildSystemPrompt();
+  const systemPrompt = await buildSystemPrompt(overrideStyle);
 
   // Detect Kapture merged format: has `# Kapture 提取：...` header + multiple `---` + `## Title` sections
   const isKaptureMerged = /^# 字幕 提取：/.test(text) && (text.match(/\n---\n/g)?.length || 0) >= 1;

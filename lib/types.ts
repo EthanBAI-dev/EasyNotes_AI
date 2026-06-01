@@ -42,6 +42,7 @@ export type MessageType =
   | { type: 'FETCH_PODCAST'; url: string; count?: number }
   | { type: 'FETCH_YOUTUBE'; url: string }
   | { type: 'FETCH_YOUTUBE_MORE'; continuation: string }
+  | { type: 'FETCH_YOUTUBE_TRANSCRIPT'; videoId: string }
   | { type: 'FETCH_BILIBILI'; url: string }
   | { type: 'FETCH_BILIBILI_SPACE'; mid: string }
   | { type: 'DOWNLOAD_BILIBILI_SUBTITLES'; videos: BilibiliVideoItem[]; ownerName: string; desc: string }

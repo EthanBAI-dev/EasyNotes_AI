@@ -483,3 +483,206 @@ function parseYouTubeRss(xml: string): {
 
   return { title, videos };
 }
+
+export interface YouTubeTranscriptLine {
+  from: number;
+  to: number;
+  content: string;
+}
+
+export interface YouTubeSubtitleResult {
+  success: boolean;
+  title: string;
+  videoId: string;
+  markdown: string;
+  lines: YouTubeTranscriptLine[];
+  error?: string;
+}
+
+async function fetchVideoPageHtml(videoId: string): Promise<string> {
+  const path = `/watch?v=${videoId}`;
+  const resp = await fetchYouTubeText(path);
+  return resp;
+}
+
+function extractPlayerResponse(html: string): Record<string, unknown> | null {
+  const match = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});/);
+  if (!match?.[1]) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function extractCaptionTracks(playerResponse: Record<string, unknown>): Array<{baseUrl: string; languageCode: string; name: {simpleText: string} }> | null {
+  try {
+    const captions = (playerResponse as any)?.captions?.playerCaptionsTracklistRenderer;
+    if (!captions?.captionTracks?.length) return null;
+    return captions.captionTracks;
+  } catch {
+    return null;
+  }
+}
+
+function pickBestTrack(tracks: Array<{baseUrl: string; languageCode: string; name: {simpleText: string} }>): typeof tracks[0] | null {
+  if (!tracks.length) return null;
+  const autoTrack = tracks.find(t => t.languageCode === 'en' || t.name?.simpleText?.includes('auto-generated'));
+  if (autoTrack) return autoTrack;
+  const enTrack = tracks.find(t => t.languageCode?.startsWith('en'));
+  if (enTrack) return enTrack;
+  return tracks[0];
+}
+
+function parseTranscriptXml(xml: string): YouTubeTranscriptLine[] {
+  const lines: YouTubeTranscriptLine[] = [];
+  const textRegex = /<text\s+start="([^"]*)"\s+dur="([^"]*)"[^>]*>([\s\S]*?)<\/text>/g;
+  let match;
+  while ((match = textRegex.exec(xml)) !== null) {
+    const from = parseFloat(match[1]);
+    const dur = parseFloat(match[2]);
+    const to = from + dur;
+    const content = match[3]
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/\\n/g, '\n')
+      .trim();
+    if (content) {
+      lines.push({ from, to, content });
+    }
+  }
+  return lines;
+}
+
+function formatTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+export function buildYouTubeMarkdown(title: string, videoId: string, lines: YouTubeTranscriptLine[]): string {
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  let md = `# ${title}\n\n`;
+  md += `**来源**: [${title}](${videoUrl})\n`;
+  md += `**视频ID**: \`${videoId}\`\n\n`;
+  md += `## 视频正文\n\n`;
+
+  let paragraph = '';
+  let lastFrom = -1;
+
+  for (const line of lines) {
+    if (lastFrom >= 0 && line.from - lastFrom > 3) {
+      if (paragraph.trim()) {
+        md += paragraph.trim() + '\n\n';
+      }
+      paragraph = '';
+    }
+    if (!paragraph) {
+      md += `\`${formatTimestamp(line.from)}\` `;
+    }
+    paragraph += line.content;
+    lastFrom = line.to;
+  }
+
+  if (paragraph.trim()) {
+    md += paragraph.trim() + '\n\n';
+  }
+
+  return md;
+}
+
+export async function fetchYouTubeTranscript(videoId: string): Promise<YouTubeSubtitleResult> {
+  let rawTitle = videoId;
+
+  try {
+    const html = await fetchVideoPageHtml(videoId);
+    const titleMatch = html.match(/<title>([^<]*)<\/title>/);
+    if (titleMatch?.[1]) {
+      rawTitle = titleMatch[1].replace(/ - YouTube$/, '').trim();
+    }
+
+    const playerResponse = extractPlayerResponse(html);
+    let trackBaseUrl: string | undefined;
+
+    if (playerResponse) {
+      const tracks = extractCaptionTracks(playerResponse);
+      if (tracks && tracks.length > 0) {
+        const track = pickBestTrack(tracks);
+        trackBaseUrl = track?.baseUrl;
+      }
+    }
+
+    if (trackBaseUrl) {
+      return await downloadAndParseTranscript(rawTitle, videoId, trackBaseUrl);
+    }
+  } catch {
+    rawTitle = await fetchVideoTitleFallback(videoId);
+  }
+
+  return await tryTimedtextFallback(rawTitle, videoId);
+}
+
+async function fetchVideoTitleFallback(videoId: string): Promise<string> {
+  try {
+    const resp = await fetch(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+    );
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data?.title) return data.title;
+    }
+  } catch { /* use videoId */ }
+  return videoId;
+}
+
+const TIMEDTEXT_LANGS = ['en', 'en-US', 'zh-Hans', 'zh-Hant', 'zh', 'ja', 'ko', 'de', 'fr', 'es'];
+
+async function tryTimedtextFallback(title: string, videoId: string): Promise<YouTubeSubtitleResult> {
+  for (const lang of TIMEDTEXT_LANGS) {
+    try {
+      const url = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=srv3`;
+      const resp = await fetch(url);
+      if (!resp.ok) continue;
+      const xml = await resp.text();
+      if (!xml || xml.includes('<transcript_list>')) continue;
+
+      const lines = parseTranscriptXml(xml);
+      if (lines.length === 0) continue;
+
+      const markdown = buildYouTubeMarkdown(title, videoId, lines);
+      return { success: true, title, videoId, markdown, lines };
+    } catch {
+      continue;
+    }
+  }
+
+  return { success: false, title, videoId, markdown: '', lines: [], error: '此视频没有可用字幕，请确认视频有字幕并且 YouTube 已打开' };
+}
+
+async function downloadAndParseTranscript(title: string, videoId: string, baseUrl: string): Promise<YouTubeSubtitleResult> {
+  try {
+    const resp = await fetch(`${baseUrl}&fmt=srv3`);
+    if (!resp.ok) {
+      return { success: false, title, videoId, markdown: '', lines: [], error: `字幕下载失败: HTTP ${resp.status}` };
+    }
+    const xml = await resp.text();
+
+    const lines = parseTranscriptXml(xml);
+    if (lines.length === 0) {
+      return { success: false, title, videoId, markdown: '', lines: [], error: '字幕内容为空' };
+    }
+
+    const markdown = buildYouTubeMarkdown(title, videoId, lines);
+    return { success: true, title, videoId, markdown, lines };
+  } catch (err: any) {
+    return await tryTimedtextFallback(title, videoId);
+  }
+}

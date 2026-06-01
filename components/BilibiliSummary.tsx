@@ -5,6 +5,8 @@ import { t } from '@/lib/i18n';
 import { isBilibiliUrl, parseBilibiliUrl, isBilibiliSpaceUrl, parseBilibiliSpaceUrl } from '@/services/bilibili';
 import type { BilibiliVideoItem, BilibiliSourceInfo } from '@/services/bilibili';
 import { getOpState, clearOpState } from '@/services/op-state';
+import { PROMPT_STYLES } from '@/services/ai-polish';
+import { getSettings } from '@/lib/settings';
 
 type State = 'idle' | 'loading' | 'loaded' | 'fetching' | 'downloading' | 'done' | 'error';
 type FetchMode = 'single' | 'space' | 'favorite' | 'series' | 'season';
@@ -52,7 +54,7 @@ function refineMode(source: BilibiliSourceInfo, _videos: BilibiliVideoItem[]): F
   return 'single';
 }
 
-export function BilibiliImport({ initialUrl, onProgress, fetchTrigger }: Props) {
+export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props) {
   const [url, setUrl] = useState(initialUrl || '');
   const [state, setState] = useState<State>('idle');
   const [error, setError] = useState('');
@@ -66,6 +68,7 @@ export function BilibiliImport({ initialUrl, onProgress, fetchTrigger }: Props) 
   const [exportMode, setExportMode] = useState<ExportMode>('merged');
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('md');
   const [aiPolish, setAiPolish] = useState(false);
+  const [aiPromptStyle, setAiPromptStyle] = useState('smooth');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dlProgress, setDlProgress] = useState<{ current: number; total: number; title?: string } | null>(null);
@@ -190,6 +193,12 @@ export function BilibiliImport({ initialUrl, onProgress, fetchTrigger }: Props) 
     }
   }, [fetchTrigger]);
 
+  useEffect(() => {
+    getSettings().then((s) => {
+      if (s.ai.promptStyle) setAiPromptStyle(s.ai.promptStyle);
+    });
+  }, []);
+
   const getSelectedVideos = () => videos.filter(v => selected.has(videoKey(v)));
 
   const handleCancel = () => {
@@ -225,6 +234,7 @@ export function BilibiliImport({ initialUrl, onProgress, fetchTrigger }: Props) 
       desc: source?.desc || '',
       source: source,
       aiPolish,
+      promptStyle: aiPromptStyle,
     });
 
     port.onMessage.addListener((msg) => {
@@ -470,6 +480,38 @@ export function BilibiliImport({ initialUrl, onProgress, fetchTrigger }: Props) 
               <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-[#00a1d6]/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#00a1d6]"></div>
             </label>
           </div>
+
+          {aiPolish && (
+            <div>
+              <p className="text-[11px] text-gray-500 mb-1.5">{t('bilibili.promptStyle')}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PROMPT_STYLES.map((style) => (
+                  <button
+                    key={style.value}
+                    onClick={() => setAiPromptStyle(style.value)}
+                    className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                      aiPromptStyle === style.value
+                        ? 'bg-[#00a1d6] text-white border-[#00a1d6]'
+                        : 'bg-white text-gray-500 border-gray-200 hover:border-[#00a1d6]/40 hover:text-[#00a1d6]'
+                    }`}
+                    title={style.description}
+                  >
+                    {style.label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setAiPromptStyle('custom')}
+                  className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                    aiPromptStyle === 'custom'
+                      ? 'bg-[#00a1d6] text-white border-[#00a1d6]'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-[#00a1d6]/40 hover:text-[#00a1d6]'
+                  }`}
+                >
+                  Custom
+                </button>
+              </div>
+            </div>
+          )}
 
           <button
             onClick={handleDownload}

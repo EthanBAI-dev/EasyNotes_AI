@@ -1,7 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Headphones, Loader2, CheckCircle, AlertCircle, Download, Music, Radio } from 'lucide-react';
 import type { PodcastInfo, PodcastEpisode } from '@/services/podcast';
 import { t } from '@/lib/i18n';
+import { PROMPT_STYLES } from '@/services/ai-polish';
+import { getSettings } from '@/lib/settings';
 
 type State = 'idle' | 'loading' | 'loaded' | 'downloading' | 'done' | 'error';
 type Platform = 'unknown' | 'apple' | 'xiaoyuzhou';
@@ -30,7 +32,7 @@ interface Props {
   initialUrl?: string;
 }
 
-export function PodcastImport({ initialUrl }: Props) {
+export function PodcastSummary({ initialUrl }: Props) {
   const [url, setUrl] = useState(initialUrl || '');
   const [count, setCount] = useState<number | undefined>(undefined);
   const [state, setState] = useState<State>('idle');
@@ -39,9 +41,17 @@ export function PodcastImport({ initialUrl }: Props) {
   const [episodes, setEpisodes] = useState<PodcastEpisode[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<{ current: number; total: number; title?: string }>({ current: 0, total: 0 });
+  const [aiPolish, setAiPolish] = useState(false);
+  const [aiPromptStyle, setAiPromptStyle] = useState('smooth');
 
   const platform = useMemo(() => detectPlatform(url), [url]);
   const theme = getPlatformConfig(platform);
+
+  useEffect(() => {
+    getSettings().then((s) => {
+      if (s.ai.promptStyle) setAiPromptStyle(s.ai.promptStyle);
+    });
+  }, []);
 
   const handleFetch = () => {
     if (!url) { setError(t('podcast.enterLink')); setState('error'); return; }
@@ -80,6 +90,8 @@ export function PodcastImport({ initialUrl }: Props) {
       type: 'DOWNLOAD_PODCAST',
       podcast,
       episodes: toDownload,
+      aiPolish,
+      promptStyle: aiPromptStyle,
     });
 
     port.onMessage.addListener((msg) => {
@@ -211,31 +223,79 @@ export function PodcastImport({ initialUrl }: Props) {
         </div>
       )}
 
-      {/* Download Button */}
+      {/* AI Polish toggle + Download */}
       {episodes.length > 0 && (
-        <button
-          onClick={handleDownload}
-          disabled={selected.size === 0 || state === 'downloading'}
-          className={`w-full py-2.5 ${theme.accent} text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press`}
-        >
-          {state === 'downloading' ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {t('podcast.downloading', { current: progress.current, total: progress.total })}
-              {progress.title && <span className="text-white/60 text-xs truncate max-w-[150px]">· {progress.title}</span>}
-            </>
-          ) : state === 'done' ? (
-            <>
-              <CheckCircle className="w-4 h-4" />
-              {t('podcast.downloadDone')}
-            </>
-          ) : (
-            <>
-              <Download className="w-4 h-4" />
-              {t('podcast.downloadSelected', { count: selected.size })}
-            </>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-gray-500">{t('podcast.aiSummary')}</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={aiPolish}
+                onChange={(e) => setAiPolish(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className={`w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-${theme.color}-500/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-${theme.color}-500`}></div>
+            </label>
+            <div className="flex-1" />
+          </div>
+
+          {aiPolish && (
+            <div>
+              <p className="text-[11px] text-gray-500 mb-1.5">{t('podcast.promptStyle')}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PROMPT_STYLES.map((style) => (
+                  <button
+                    key={style.value}
+                    onClick={() => setAiPromptStyle(style.value)}
+                    className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                      aiPromptStyle === style.value
+                        ? `${theme.accent} text-white`
+                        : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+                    }`}
+                    title={style.description}
+                  >
+                    {style.label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setAiPromptStyle('custom')}
+                  className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                    aiPromptStyle === 'custom'
+                      ? `${theme.accent} text-white`
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  Custom
+                </button>
+              </div>
+            </div>
           )}
-        </button>
+          
+          <button
+            onClick={handleDownload}
+            disabled={selected.size === 0 || state === 'downloading'}
+            className={`w-full py-2.5 ${theme.accent} text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press`}
+          >
+            {state === 'downloading' ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {t('podcast.downloading', { current: progress.current, total: progress.total })}
+                {progress.title && <span className="text-white/60 text-xs truncate max-w-[150px]">· {progress.title}</span>}
+              </>
+            ) : state === 'done' ? (
+              <>
+                <CheckCircle className="w-4 h-4" />
+                {t('podcast.downloadDone')}
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                {aiPolish ? '下载并总结' : t('podcast.downloadSelected', { count: selected.size })}
+              </>
+            )}
+          </button>
+        </div>
       )}
 
       {/* Error */}
