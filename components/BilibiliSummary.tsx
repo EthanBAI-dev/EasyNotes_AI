@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Tv2, Loader2, CheckCircle, AlertCircle, ChevronDown, ChevronUp, Download, User, PlayCircle, Heart, Layers, X, Info } from 'lucide-react';
+import { Tv2, Loader2, CheckCircle, AlertCircle, ChevronDown, ChevronUp, Download, User, PlayCircle, Heart, Layers, X, Info, Brain } from 'lucide-react';
 import type { ImportProgress } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { isBilibiliUrl, parseBilibiliUrl, isBilibiliSpaceUrl, parseBilibiliSpaceUrl } from '@/services/bilibili';
@@ -7,6 +7,8 @@ import type { BilibiliVideoItem, BilibiliSourceInfo } from '@/services/bilibili'
 import { getOpState, clearOpState } from '@/services/op-state';
 import { PROMPT_STYLES } from '@/services/ai-polish';
 import { getSettings } from '@/lib/settings';
+import { MindMap, useMindMapGenerator } from '@/components/MindMap';
+import { fetchVideoSubtitle, mergeBilibiliSubtitles } from '@/services/bilibili';
 
 type State = 'idle' | 'loading' | 'loaded' | 'fetching' | 'downloading' | 'done' | 'error';
 type FetchMode = 'single' | 'space' | 'favorite' | 'series' | 'season';
@@ -75,6 +77,9 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dlProgress, setDlProgress] = useState<{ current: number; total: number; title?: string } | null>(null);
   const abortRef = useRef<{ port?: chrome.runtime.Port; cancel: () => void }>({ cancel: () => {} });
+
+  const { state: mindMapState, mindMapText, error: mindMapError, generate: generateMindMap, setState: setMindMapState } = useMindMapGenerator();
+  const [showMindMap, setShowMindMap] = useState(false);
 
   const isLocked = state === 'downloading';
   const isLockedRef = useRef(false);
@@ -477,6 +482,56 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
               <ChevronDown className="w-3 h-3" />加载更多（{videos.length - displayCount} 个）
             </button>
           )}
+        </div>
+      )}
+
+      {/* Mind Map */}
+      {videos.length > 0 && !showMindMap && (
+        <button
+          onClick={async () => {
+            setShowMindMap(true);
+            setMindMapState('loading');
+            try {
+              const selectedVideos = getSelectedVideos();
+              const results: { markdown: string | null; partLabel: string }[] = [];
+              for (const v of selectedVideos) {
+                const result = await fetchVideoSubtitle(v, source?.owner || '', source?.desc || '');
+                results.push({ markdown: result.markdown, partLabel: v.part || v.title });
+              }
+              const partsWithContent = results.filter(r => r.markdown);
+              if (partsWithContent.length === 0) {
+                setMindMapState('error');
+                setShowMindMap(false);
+                return;
+              }
+              const subtitleText = partsWithContent
+                .map(r => `【${r.partLabel}】\n${r.markdown?.replace(/^#.*\n?/gm, '').trim() || ''}`)
+                .join('\n\n');
+              generateMindMap({ subtitleText, sourceTitle: source?.title });
+            } catch {
+              setMindMapState('error');
+            }
+          }}
+          disabled={mindMapState === 'loading'}
+          className="w-full py-2 text-xs text-purple-500 hover:text-purple-600 hover:bg-purple-50 border border-purple-200/60 rounded-lg flex items-center justify-center gap-1.5 transition-colors duration-150 disabled:opacity-50"
+        >
+          {mindMapState === 'loading' ? (
+            <><Loader2 className="w-3 h-3 animate-spin" />{t('mindmap.generating')}</>
+          ) : (
+            <><Brain className="w-3 h-3" />{t('mindmap.generate')}</>
+          )}
+        </button>
+      )}
+      {showMindMap && (mindMapState === 'loading' || mindMapState === 'done') && (
+        <MindMap
+          text={mindMapText}
+          onClose={() => { setShowMindMap(false); setMindMapState('idle'); }}
+        />
+      )}
+      {showMindMap && mindMapState === 'error' && (
+        <div className="flex items-center gap-2 text-red-500 text-xs bg-red-50 border border-red-100/60 rounded-lg p-2">
+          <AlertCircle className="w-3 h-3 flex-shrink-0" />
+          {mindMapError}
         </div>
       )}
 

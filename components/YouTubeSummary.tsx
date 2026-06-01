@@ -1,17 +1,17 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { Youtube, Loader2, CheckCircle, AlertCircle, PlayCircle, ListVideo, User, ChevronDown, ChevronUp, Download, X, Info } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Youtube, Loader2, CheckCircle, AlertCircle, PlayCircle, ListVideo, User, ChevronDown, ChevronUp, Download, X, Info, Brain } from 'lucide-react';
 import type { ImportProgress, YouTubeResult, YouTubeVideoItem, YouTubeSourceInfo } from '@/lib/types';
-import type { YouTubeTranscriptLine } from '@/services/youtube';
 import { t } from '@/lib/i18n';
-import { isYouTubeUrl, parseYouTubeUrl, buildYouTubeMarkdown } from '@/services/youtube';
-import { polishSubtitlesWithChunks } from '@/services/ai-polish';
+import { isYouTubeUrl, parseYouTubeUrl, fetchYouTubeTranscript } from '@/services/youtube';
+import { getOpState, clearOpState } from '@/services/op-state';
 import { PROMPT_STYLES } from '@/services/ai-polish';
 import { getSettings } from '@/lib/settings';
+import { MindMap, useMindMapGenerator } from '@/components/MindMap';
 
 type State = 'idle' | 'loading' | 'loaded' | 'downloading' | 'done' | 'error';
-type TranscriptState = 'idle' | 'loading' | 'loaded' | 'error';
+type ExportMode = 'separate' | 'merged';
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 100;
 
 const sourceIcons = {
   video: PlayCircle,
@@ -32,24 +32,25 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
   const [source, setSource] = useState<YouTubeSourceInfo | null>(null);
   const [videos, setVideos] = useState<YouTubeVideoItem[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [results, setResults] = useState<{ success: number; failed: number } | null>(null);
   const [continuation, setContinuation] = useState<string | undefined>();
   const [loadingMore, setLoadingMore] = useState(false);
   const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
   const [doneMsg, setDoneMsg] = useState('');
 
-  const [transcriptState, setTranscriptState] = useState<TranscriptState>('idle');
-  const [transcriptError, setTranscriptError] = useState('');
-  const [transcriptLines, setTranscriptLines] = useState<YouTubeTranscriptLine[]>([]);
-  const [transcriptTitle, setTranscriptTitle] = useState('');
-  const [transcriptVideoId, setTranscriptVideoId] = useState('');
+  const [exportMode, setExportMode] = useState<ExportMode>('merged');
   const [aiPolish, setAiPolish] = useState(false);
   const [aiPromptStyle, setAiPromptStyle] = useState('smooth');
-  const [exportMode, setExportMode] = useState<'separate' | 'merged'>('separate');
-  const [listHeight, setListHeight] = useState(96);
+  const [listHeight, setListHeight] = useState(144);
   const [listExpanded, setListExpanded] = useState(true);
   const [dlProgress, setDlProgress] = useState<{ current: number; total: number; title?: string } | null>(null);
-  const [dlPhase, setDlPhase] = useState('');
+  const abortRef = useRef<{ port?: chrome.runtime.Port; cancel: () => void }>({ cancel: () => {} });
+
+  const { state: mindMapState, mindMapText, error: mindMapError, generate: generateMindMap, setState: setMindMapState } = useMindMapGenerator();
+  const [showMindMap, setShowMindMap] = useState(false);
+
+  const isLocked = state === 'downloading';
+  const isLockedRef = useRef(false);
+  isLockedRef.current = isLocked;
 
   const displayedVideos = useMemo(() => videos.slice(0, displayCount), [videos, displayCount]);
   const canLoadMore = displayCount < videos.length || !!continuation;
@@ -60,12 +61,20 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
   }, [url]);
 
   const isSingleVideo = urlType === 'video';
-
   const SourceIcon = sourceIcons[urlType as keyof typeof sourceIcons] || Youtube;
 
-  const isLocked = state === 'downloading';
+  const getSelectedVideos = () => videos.filter(v => selected.has(v.id));
 
-  const handleFetch = () => {
+  useEffect(() => {
+    getOpState().then((op) => {
+      if (op?.active) {
+        setState('downloading');
+        setDlProgress({ current: op.current || 0, total: op.total || 0, title: op.title || '' });
+      }
+    });
+  }, []);
+
+  const handleFetch = useCallback(() => {
     if (!url) { setError(t('youtube.enterLink')); setState('error'); return; }
     if (urlType === 'unknown') { setError(t('youtube.unrecognized')); setState('error'); return; }
 
@@ -73,13 +82,9 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
     setError('');
     setSource(null);
     setVideos([]);
-    setResults(null);
     setContinuation(undefined);
     setDisplayCount(PAGE_SIZE);
     setDoneMsg('');
-    setTranscriptState('idle');
-    setTranscriptError('');
-    setTranscriptLines([]);
 
     chrome.runtime.sendMessage(
       { type: 'FETCH_YOUTUBE', url },
@@ -98,7 +103,7 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
         }
       },
     );
-  };
+  }, [url, urlType, t]);
 
   const revealNextPage = (allVideos: YouTubeVideoItem[]) => {
     const nextCount = Math.min(displayCount + PAGE_SIZE, allVideos.length);
@@ -137,150 +142,81 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
     );
   };
 
-  const handleFetchTranscript = () => {
-    if (!isSingleVideo) return;
-    const videoId = videos[0]?.id;
-    if (!videoId) return;
-
-    setTranscriptState('loading');
-    setTranscriptError('');
-
-    chrome.runtime.sendMessage(
-      { type: 'FETCH_YOUTUBE_TRANSCRIPT', videoId },
-      (resp) => {
-        if (resp?.success && resp.data) {
-          const data = resp.data as {
-            success: boolean;
-            title: string;
-            videoId: string;
-            markdown: string;
-            lines: YouTubeTranscriptLine[];
-            error?: string;
-          };
-          if (data.success) {
-            setTranscriptLines(data.lines);
-            setTranscriptTitle(data.title);
-            setTranscriptVideoId(data.videoId);
-            setTranscriptState('loaded');
-          } else {
-            setTranscriptState('error');
-            setTranscriptError(data.error || t('youtube.transcriptFailed'));
-          }
-        } else {
-          setTranscriptState('error');
-          setTranscriptError(resp?.error || t('youtube.transcriptFailed'));
-        }
-      },
-    );
-  };
-
-  const handleDownloadTranscript = async () => {
-    if (transcriptLines.length === 0) return;
-    setState('downloading');
-    setDlProgress({ current: 0, total: aiPolish ? 3 : 1, title: '' });
-    setError('');
-
-    try {
-      let markdown = buildYouTubeMarkdown(transcriptTitle, transcriptVideoId, transcriptLines);
-
-      if (aiPolish) {
-        setDlProgress({ current: 1, total: 3, title: 'AI 润色中...' });
-        const polished = await polishSubtitlesWithChunks(markdown, transcriptLines, (c, t) => {
-          setDlProgress({ current: c, total: t, title: `AI 润色 ${c}/${t}` });
-        }, aiPromptStyle);
-        if (!polished.success && polished.error) {
-          setState('error');
-          setError(`AI 润色失败：${polished.error}`);
-          setDlProgress(null);
-          return;
-        }
-        if (polished.success) markdown = polished.polished;
-      }
-
-      setDlProgress({ current: aiPolish ? 3 : 1, total: aiPolish ? 3 : 1, title: '' });
-      const filename = `${transcriptTitle.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)}.md`;
-      const encoded = btoa(unescape(encodeURIComponent(markdown)));
-      const dataUrl = `data:text/markdown;base64,${encoded}`;
-      await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
-      setDlProgress(null);
-      setDoneMsg(aiPolish ? '字幕已润色并下载完成' : '字幕下载完成');
-      setState('done');
-    } catch (err: any) {
-      setState('error');
-      setError(err.message || '下载失败');
-      setDlProgress(null);
-    }
-  };
-
   const handleCancel = () => {
+    abortRef.current.cancel();
+    if (abortRef.current.port) {
+      try { abortRef.current.port.disconnect(); } catch {}
+      abortRef.current.port = undefined;
+    }
+    clearOpState();
     setDlProgress(null);
     setState('idle');
+    setError('操作已取消');
   };
 
   const handleDownload = () => {
-    const toDownload = videos.filter((v) => selected.has(v.id));
-    if (toDownload.length === 0) { setError(t('youtube.selectAtLeastOne')); setState('error'); return; }
+    const toProcess = isSingleVideo ? videos : getSelectedVideos();
+    if (toProcess.length === 0) { setError(t('youtube.selectAtLeastOne')); setState('error'); return; }
 
     setState('downloading');
     setError('');
     setDoneMsg('');
-    setDlProgress({ current: 0, total: toDownload.length });
-    setDlPhase('downloading');
+    setDlProgress({ current: 0, total: toProcess.length });
 
+    const msgType = exportMode === 'merged' ? 'YOUTUBE_DOWNLOAD_MERGED' : 'YOUTUBE_DOWNLOAD_SEPARATE';
     const port = chrome.runtime.connect({ name: 'youtube-download' });
+    abortRef.current = { port, cancel: () => {} };
+    let cancelled = false;
+
     port.postMessage({
-      type: exportMode === 'merged' ? 'YOUTUBE_DOWNLOAD_MERGED' : 'YOUTUBE_DOWNLOAD_SEPARATE',
-      videos: toDownload,
+      type: msgType,
+      videos: toProcess,
       source: source,
       aiPolish,
       promptStyle: aiPromptStyle,
     });
 
     port.onMessage.addListener((msg) => {
+      if (cancelled) return;
       if (msg.phase === 'downloading') {
-        setDlPhase('downloading');
         setDlProgress({ current: Number(msg.current), total: Number(msg.total), title: String(msg.title || '') });
       } else if (msg.phase === 'polishing') {
-        setDlPhase('polishing');
         const cur = Number(msg.current || 0);
         const tot = Number(msg.total || 0);
-        setDlProgress({ current: cur, total: tot, title: `AI 润色 ${cur}/${tot}` });
+        const pct = tot > 0 ? Math.round((cur / tot) * 100) : 0;
+        setDlProgress({ current: cur, total: tot, title: `AI 润色 ${pct}% (${cur}/${tot})` });
       } else if (msg.phase === 'done') {
         setDlProgress(null);
-        setDlPhase('');
         port.disconnect();
+        abortRef.current = { cancel: () => {} };
         if (msg.downloaded !== undefined) {
           const { downloaded, skipped } = msg as any;
           setDoneMsg(skipped > 0
             ? `已下载 ${downloaded} 个字幕文件，${skipped} 个无字幕`
             : `已下载 ${downloaded} 个字幕文件`
           );
-          setResults({ success: downloaded, failed: skipped });
         } else {
-          setDoneMsg('已合并下载完成');
-          setResults({ success: toDownload.length, failed: 0 });
+          setDoneMsg(`已合并下载 ${toProcess.length} 个视频内容`);
         }
         setState('done');
       } else if (msg.phase === 'error') {
         setDlProgress(null);
-        setDlPhase('');
         port.disconnect();
+        abortRef.current = { cancel: () => {} };
         setState('error');
         setError(String(msg.error || t('youtube.fetchFailed')));
       }
     });
 
     port.onDisconnect.addListener(() => {
-      if (state === 'downloading') {
-        setDlProgress(null);
-        setDlPhase('');
-        setState('done');
-      }
+      abortRef.current = { cancel: () => {} };
     });
+
+    abortRef.current.cancel = () => { cancelled = true; };
   };
 
   const toggleVideo = (id: string) => {
-    setSelected((prev) => {
+    setSelected(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -291,30 +227,24 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
   const selectAll = () => setSelected(new Set(displayedVideos.map((v) => v.id)));
   const selectNone = () => setSelected(new Set());
 
-  // Auto-fetch when opened from a YouTube tab
   const lastAutoUrl = useRef<string | null>(null);
   useEffect(() => {
-    if (initialUrl && isYouTubeUrl(initialUrl) && lastAutoUrl.current !== initialUrl) {
-      lastAutoUrl.current = initialUrl;
-      setUrl(initialUrl);
-      handleFetch();
-    }
-  }, [initialUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!initialUrl) return;
+    if (isLockedRef.current) return;
+    if (lastAutoUrl.current === initialUrl) return;
+    lastAutoUrl.current = initialUrl;
+    setUrl(initialUrl);
+    if (isYouTubeUrl(initialUrl)) handleFetch();
+  }, [initialUrl]);
 
   useEffect(() => {
+    if (isLockedRef.current) return;
     if (fetchTrigger && fetchTrigger > 0 && initialUrl && isYouTubeUrl(initialUrl)) {
       lastAutoUrl.current = null;
       setUrl(initialUrl);
       handleFetch();
     }
-  }, [fetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-fetch transcript for single video
-  useEffect(() => {
-    if (isSingleVideo && state === 'loaded' && videos.length === 1 && transcriptState === 'idle') {
-      handleFetchTranscript();
-    }
-  }, [isSingleVideo, state, videos.length, transcriptState]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchTrigger]);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -322,10 +252,7 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
     });
   }, []);
 
-  const transcriptPreview = useMemo(() => {
-    if (transcriptLines.length === 0) return '';
-    return transcriptLines.slice(0, 10).map(l => l.content).join(' ');
-  }, [transcriptLines]);
+  const isWorking = state === 'loading' || state === 'downloading';
 
   return (
     <div className="space-y-5">
@@ -342,7 +269,7 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !isLocked) handleFetch(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !isWorking) handleFetch(); }}
               readOnly={isLocked}
               placeholder={t('youtube.placeholder')}
               className="w-full pl-10 pr-3 py-2 border border-gray-200/60 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-transparent placeholder:text-gray-400/70"
@@ -350,8 +277,8 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
           </div>
           <button
             onClick={handleFetch}
-            disabled={!url || state === 'loading' || isLocked}
-            className="px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
+            disabled={!url || isWorking}
+            className="px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press flex-shrink-0"
           >
             {state === 'loading' ? (
               <><Loader2 className="w-3 h-3 animate-spin" />{t('youtube.querying')}</>
@@ -377,12 +304,12 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-red-900 truncate">{source.title}</p>
                 <p className="text-xs text-red-600">
-                  {source.type !== 'video' && (
-                    <><span className="font-mono tabular-nums">{displayedVideos.length}</span> {t('youtube.videos')}</>
-                  )}
-                  {source.type === 'video' && (
+                  {source.type === 'video' ? (
                     <span>{t('youtube.singleVideo')}</span>
+                  ) : (
+                    <span className="font-mono tabular-nums">{source.videoCount}</span>
                   )}
+                  {source.type !== 'video' && <span className="ml-0.5">{t('youtube.videos')}</span>}
                 </p>
               </div>
             </div>
@@ -467,130 +394,66 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
               {loadingMore ? (
                 <><Loader2 className="w-3 h-3 animate-spin" />{t('youtube.loadingMore')}</>
               ) : (
-                <><ChevronDown className="w-3 h-3" />{t('youtube.loadMore')}</>
+                <><ChevronDown className="w-3 h-3" />加载更多（{videos.length - displayCount} 个）</>
               )}
             </button>
           )}
         </div>
       )}
 
-      {/* Single Video: Transcript Section */}
-      {isSingleVideo && videos.length === 1 && state === 'loaded' && (
-        <div className="space-y-3 border border-gray-200/60 rounded-lg p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-              <PlayCircle className="w-4 h-4 text-red-500" />
-              {t('youtube.downloadSubtitles')}
-            </span>
-            {transcriptState === 'idle' && (
-              <button
-                onClick={handleFetchTranscript}
-                className="px-3 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors duration-150"
-              >
-                {t('youtube.fetchTranscript')}
-              </button>
-            )}
-            {transcriptState === 'loading' && (
-              <span className="flex items-center gap-1 text-xs text-red-500">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                {t('youtube.fetchingTranscript')}
-              </span>
-            )}
-          </div>
-
-          {/* Transcript loading indicator for initial auto-fetch */}
-          {transcriptState === 'loading' && (
-            <div className="flex items-center justify-center py-3 text-gray-400">
-              <Loader2 className="w-5 h-5 animate-spin mr-2" />
-              <span className="text-sm">{t('youtube.fetchingTranscript')}</span>
-            </div>
+      {/* Mind Map */}
+      {videos.length > 0 && !showMindMap && (
+        <button
+          onClick={async () => {
+            setShowMindMap(true);
+            setMindMapState('loading');
+            try {
+              const selectedVideos = getSelectedVideos();
+              const transcripts: { title: string; text: string }[] = [];
+              for (const v of selectedVideos) {
+                const t = await fetchYouTubeTranscript(v.id);
+                if (t.success && t.markdown) {
+                  transcripts.push({ title: v.title, text: t.markdown.replace(/^#.*\n?/gm, '').trim() });
+                }
+              }
+              if (transcripts.length === 0) {
+                setMindMapState('error');
+                setShowMindMap(false);
+                return;
+              }
+              const subtitleText = transcripts
+                .map(r => `【${r.title}】\n${r.text}`)
+                .join('\n\n');
+              generateMindMap({ subtitleText, sourceTitle: source?.title });
+            } catch {
+              setMindMapState('error');
+            }
+          }}
+          disabled={mindMapState === 'loading'}
+          className="w-full py-2 text-xs text-purple-500 hover:text-purple-600 hover:bg-purple-50 border border-purple-200/60 rounded-lg flex items-center justify-center gap-1.5 transition-colors duration-150 disabled:opacity-50"
+        >
+          {mindMapState === 'loading' ? (
+            <><Loader2 className="w-3 h-3 animate-spin" />{t('mindmap.generating')}</>
+          ) : (
+            <><Brain className="w-3 h-3" />{t('mindmap.generate')}</>
           )}
-
-          {/* Transcript loaded */}
-          {transcriptState === 'loaded' && (
-            <>
-              {/* Transcript preview */}
-              <div className="bg-gray-50 rounded-lg p-3 max-h-32 overflow-y-auto">
-                <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">
-                  {transcriptPreview}
-                  {transcriptLines.length > 10 && (
-                    <span className="text-gray-400 ml-1">...（共 {transcriptLines.length} 行）</span>
-                  )}
-                </p>
-              </div>
-
-              {/* AI Polish toggle + Download */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-gray-500">{t('youtube.aiPolish')}</span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={aiPolish}
-                    onChange={(e) => setAiPolish(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-red-500/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-500"></div>
-                </label>
-                <div className="flex-1" />
-                <button
-                  onClick={handleDownloadTranscript}
-                  disabled={isLocked}
-                  className="px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
-                >
-                  {aiPolish ? (
-                    <><Download className="w-3.5 h-3.5" />下载总结字幕</>
-                  ) : (
-                    <><Download className="w-3.5 h-3.5" />{t('youtube.downloadSubtitles')}</>
-                  )}
-                </button>
-              </div>
-
-              {aiPolish && transcriptState === 'done' && (
-                <div>
-                  <p className="text-xs font-medium text-gray-600 mb-1.5">{t('youtube.promptStyle')}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PROMPT_STYLES.map((style) => (
-                      <button
-                        key={style.value}
-                        onClick={() => setAiPromptStyle(style.value)}
-                        className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
-                          aiPromptStyle === style.value
-                            ? 'bg-red-500 text-white border-red-500'
-                            : 'bg-white text-gray-500 border-gray-200 hover:border-red-300 hover:text-red-500'
-                        }`}
-                        title={style.description}
-                      >
-                        {style.label}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => setAiPromptStyle('custom')}
-                      className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
-                        aiPromptStyle === 'custom'
-                          ? 'bg-red-500 text-white border-red-500'
-                          : 'bg-white text-gray-500 border-gray-200 hover:border-red-300 hover:text-red-500'
-                      }`}
-                    >
-                      Custom
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Transcript error */}
-          {transcriptState === 'error' && (
-            <div className="flex items-center gap-2 text-amber-500 text-xs bg-amber-50 border border-amber-100/60 rounded-lg p-2">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-              {transcriptError}
-            </div>
-          )}
+        </button>
+      )}
+      {showMindMap && (mindMapState === 'loading' || mindMapState === 'done') && (
+        <MindMap
+          text={mindMapText}
+          onClose={() => { setShowMindMap(false); setMindMapState('idle'); }}
+        />
+      )}
+      {showMindMap && mindMapState === 'error' && (
+        <div className="flex items-center gap-2 text-red-500 text-xs bg-red-50 border border-red-100/60 rounded-lg p-2">
+          <AlertCircle className="w-3 h-3 flex-shrink-0" />
+          {mindMapError}
         </div>
       )}
 
-      {/* Download Section (playlist/channel only) */}
-      {displayedVideos.length > 1 && (
+      {/* Download Section */}
+      {videos.length > 0 && (
         <div className="space-y-3">
           <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
             <Download className="w-4 h-4 text-red-500" />
@@ -667,34 +530,34 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
 
           <button
             onClick={handleDownload}
-            disabled={selected.size === 0 || isLocked}
+            disabled={selected.size === 0 || isWorking}
             className="w-full py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
           >
             {state === 'downloading' ? (
-              <><Loader2 className="w-4 h-4 animate-spin" />{dlPhase === 'polishing' ? 'AI 润色中...' : t('youtube.downloadingProgress')}</>
-            ) : state === 'done' ? (
-              <><CheckCircle className="w-4 h-4" />{t('youtube.downloadDone')}</>
+              <><Loader2 className="w-4 h-4 animate-spin" />{t('youtube.downloadingProgress')}</>
             ) : (
-              <><Download className="w-4 h-4" />{t('youtube.downloadSubtitles')}（{selected.size}）</>
+              <><Download className="w-4 h-4" />{t('youtube.oneClickDownload')}（{selected.size}）</>
             )}
           </button>
         </div>
       )}
 
       {/* Download Progress Overlay */}
-      {isLocked && dlProgress && (
+      {isLocked && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 w-[280px] text-center space-y-4 animate-fade-in">
             <div className="w-12 h-12 mx-auto rounded-full bg-red-500/10 flex items-center justify-center">
               <Download className="w-6 h-6 text-red-500" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-800">{t('youtube.downloading')}</p>
-              {dlProgress.title && (
-                <p className="text-xs text-gray-400 mt-1">{dlProgress.title}</p>
+              <p className="text-sm font-medium text-gray-800">正在下载字幕…</p>
+              {dlProgress && (
+                <p className="text-xs text-gray-400 mt-1">
+                  {dlProgress.title || `${dlProgress.current}/${dlProgress.total}`}
+                </p>
               )}
             </div>
-            {dlProgress.total > 1 && (
+            {dlProgress && dlProgress.total > 0 && (
               <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
                 <div
                   className="bg-red-500 h-1.5 rounded-full transition-all duration-500"
@@ -717,19 +580,8 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
         </div>
       )}
 
-      {/* Results */}
-      {results && state === 'done' && !isSingleVideo && (
-        <div className="text-sm text-center">
-          {results.failed === 0 ? (
-            <span className="text-green-600">{t('successCount', { success: results.success })}</span>
-          ) : (
-            <span className="text-amber-600">{t('successFailCount', { success: results.success, failed: results.failed })}</span>
-          )}
-        </div>
-      )}
-
-      {/* Done message for single video transcript */}
-      {state === 'done' && isSingleVideo && doneMsg && (
+      {/* Done */}
+      {state === 'done' && doneMsg && (
         <div className="flex items-center gap-2 text-green-600 text-sm bg-green-50 border border-green-100/60 rounded-lg p-3">
           <CheckCircle className="w-4 h-4 flex-shrink-0" />
           {doneMsg}
@@ -756,7 +608,6 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
           </ul>
         </div>
       )}
-
     </div>
   );
 }

@@ -389,7 +389,7 @@ export function AISummary({ onProgress }: Props) {
       {state === 'success' && (
         <div className="flex items-center gap-2 text-green-600 text-sm bg-green-50 border border-green-100/60 rounded-lg p-3 shadow-soft">
           <CheckCircle className="w-4 h-4" />
-          {t('importSuccess')}
+          {t('downloadSuccess')}
         </div>
       )}
       {state === 'error' && (

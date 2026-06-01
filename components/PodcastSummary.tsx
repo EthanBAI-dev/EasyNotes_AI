@@ -1,9 +1,11 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Headphones, Loader2, CheckCircle, AlertCircle, Download, Music, Radio } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Headphones, Loader2, CheckCircle, AlertCircle, ChevronDown, ChevronUp, Download, X, Music, Radio, Info, Brain } from 'lucide-react';
 import type { PodcastInfo, PodcastEpisode } from '@/services/podcast';
 import { t } from '@/lib/i18n';
+import { getOpState, clearOpState } from '@/services/op-state';
 import { PROMPT_STYLES } from '@/services/ai-polish';
 import { getSettings } from '@/lib/settings';
+import { MindMap, useMindMapGenerator } from '@/components/MindMap';
 
 type State = 'idle' | 'loading' | 'loaded' | 'downloading' | 'done' | 'error';
 type Platform = 'unknown' | 'apple' | 'xiaoyuzhou';
@@ -14,19 +16,15 @@ function detectPlatform(url: string): Platform {
   return 'unknown';
 }
 
-const platformStyles = {
-  apple: { color: 'purple', accent: 'bg-purple-500 hover:bg-purple-550', accentLight: 'bg-purple-50', textAccent: 'text-purple-600', textDark: 'text-purple-900', ring: 'focus:ring-purple-500', check: 'text-purple-500', border: 'border-purple-100/60' },
-  xiaoyuzhou: { color: 'emerald', accent: 'bg-emerald-500 hover:bg-emerald-550', accentLight: 'bg-emerald-50', textAccent: 'text-emerald-600', textDark: 'text-emerald-900', ring: 'focus:ring-emerald-500', check: 'text-emerald-500', border: 'border-emerald-100/60' },
-  unknown: { color: 'purple', accent: 'bg-purple-500 hover:bg-purple-550', accentLight: 'bg-purple-50', textAccent: 'text-purple-600', textDark: 'text-purple-900', ring: 'focus:ring-purple-500', check: 'text-purple-500', border: 'border-purple-100/60' },
+const platformColors = {
+  apple: { accent: 'bg-purple-500 hover:bg-purple-600', accentLight: 'bg-purple-50', textAccent: 'text-purple-600', textDark: 'text-purple-900', border: 'border-purple-100/60', ring: 'focus:ring-purple-500', check: 'text-purple-500', dot: 'bg-purple-500' },
+  xiaoyuzhou: { accent: 'bg-emerald-500 hover:bg-emerald-600', accentLight: 'bg-emerald-50', textAccent: 'text-emerald-600', textDark: 'text-emerald-900', border: 'border-emerald-100/60', ring: 'focus:ring-emerald-500', check: 'text-emerald-500', dot: 'bg-emerald-500' },
+  unknown: { accent: 'bg-purple-500 hover:bg-purple-600', accentLight: 'bg-purple-50', textAccent: 'text-purple-600', textDark: 'text-purple-900', border: 'border-purple-100/60', ring: 'focus:ring-purple-500', check: 'text-purple-500', dot: 'bg-purple-500' },
 };
 const platformNames: Record<string, string> = {
   apple: 'Apple Podcasts',
   xiaoyuzhou: '小宇宙',
 };
-function getPlatformConfig(platform: string) {
-  const styles = platformStyles[platform as keyof typeof platformStyles] || platformStyles.unknown;
-  return { name: platformNames[platform] || t('app.tabPodcast'), ...styles };
-}
 
 interface Props {
   initialUrl?: string;
@@ -40,12 +38,33 @@ export function PodcastSummary({ initialUrl }: Props) {
   const [podcast, setPodcast] = useState<PodcastInfo | null>(null);
   const [episodes, setEpisodes] = useState<PodcastEpisode[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [progress, setProgress] = useState<{ current: number; total: number; title?: string }>({ current: 0, total: 0 });
+  const [doneMsg, setDoneMsg] = useState('');
+  const [listExpanded, setListExpanded] = useState(true);
+
   const [aiPolish, setAiPolish] = useState(false);
   const [aiPromptStyle, setAiPromptStyle] = useState('smooth');
+  const [dlProgress, setDlProgress] = useState<{ current: number; total: number; title?: string } | null>(null);
+  const abortRef = useRef<{ port?: chrome.runtime.Port; cancel: () => void }>({ cancel: () => {} });
+
+  const { state: mindMapState, mindMapText, error: mindMapError, generate: generateMindMap, setState: setMindMapState } = useMindMapGenerator();
+  const [showMindMap, setShowMindMap] = useState(false);
+
+  const isLocked = state === 'downloading';
+  const isLockedRef = useRef(false);
+  isLockedRef.current = isLocked;
 
   const platform = useMemo(() => detectPlatform(url), [url]);
-  const theme = getPlatformConfig(platform);
+  const colors = platformColors[platform];
+  const platformName = platformNames[platform] || t('app.tabPodcast');
+
+  useEffect(() => {
+    getOpState().then((op) => {
+      if (op?.active) {
+        setState('downloading');
+        setDlProgress({ current: op.current || 0, total: op.total || 0, title: op.title || '' });
+      }
+    });
+  }, []);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -53,13 +72,15 @@ export function PodcastSummary({ initialUrl }: Props) {
     });
   }, []);
 
-  const handleFetch = () => {
+  const handleFetch = useCallback(() => {
     if (!url) { setError(t('podcast.enterLink')); setState('error'); return; }
     if (platform === 'unknown') { setError(t('podcast.unrecognized')); setState('error'); return; }
+
     setState('loading');
     setError('');
     setPodcast(null);
     setEpisodes([]);
+    setDoneMsg('');
 
     chrome.runtime.sendMessage(
       { type: 'FETCH_PODCAST', url, count },
@@ -76,6 +97,18 @@ export function PodcastSummary({ initialUrl }: Props) {
         }
       },
     );
+  }, [url, platform, count, t]);
+
+  const handleCancel = () => {
+    abortRef.current.cancel();
+    if (abortRef.current.port) {
+      try { abortRef.current.port.disconnect(); } catch {}
+      abortRef.current.port = undefined;
+    }
+    clearOpState();
+    setDlProgress(null);
+    setState('idle');
+    setError('操作已取消');
   };
 
   const handleDownload = () => {
@@ -83,9 +116,14 @@ export function PodcastSummary({ initialUrl }: Props) {
     if (toDownload.length === 0) { setError(t('podcast.selectAtLeastOne')); setState('error'); return; }
 
     setState('downloading');
-    setProgress({ current: 0, total: toDownload.length });
+    setError('');
+    setDoneMsg('');
+    setDlProgress({ current: 0, total: toDownload.length });
 
     const port = chrome.runtime.connect({ name: 'podcast-download' });
+    abortRef.current = { port, cancel: () => {} };
+    let cancelled = false;
+
     port.postMessage({
       type: 'DOWNLOAD_PODCAST',
       podcast,
@@ -95,21 +133,34 @@ export function PodcastSummary({ initialUrl }: Props) {
     });
 
     port.onMessage.addListener((msg) => {
+      if (cancelled) return;
       if (msg.phase === 'downloading') {
-        setProgress({ current: msg.current, total: msg.total, title: msg.title });
+        setDlProgress({ current: msg.current, total: msg.total, title: msg.title });
+      } else if (msg.phase === 'polishing') {
+        const cur = Number(msg.current || 0);
+        const tot = Number(msg.total || 0);
+        const pct = tot > 0 ? Math.round((cur / tot) * 100) : 0;
+        setDlProgress({ current: cur, total: tot, title: `AI 润色 ${pct}% (${cur}/${tot})` });
       } else if (msg.phase === 'done') {
-        setState('done');
+        setDlProgress(null);
         port.disconnect();
+        abortRef.current = { cancel: () => {} };
+        setDoneMsg(`已下载 ${toDownload.length} 个播客音频`);
+        setState('done');
       } else if (msg.phase === 'error') {
+        setDlProgress(null);
+        port.disconnect();
+        abortRef.current = { cancel: () => {} };
         setState('error');
         setError(msg.error || t('podcast.downloadFailed'));
-        port.disconnect();
       }
     });
 
     port.onDisconnect.addListener(() => {
-      if (state === 'downloading') setState('done');
+      abortRef.current = { cancel: () => {} };
     });
+
+    abortRef.current.cancel = () => { cancelled = true; };
   };
 
   const toggleEpisode = (id: string) => {
@@ -124,13 +175,27 @@ export function PodcastSummary({ initialUrl }: Props) {
   const selectAll = () => setSelected(new Set(episodes.map((e) => e.id)));
   const selectNone = () => setSelected(new Set());
 
+  const lastAutoUrl = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialUrl) return;
+    if (isLockedRef.current) return;
+    if (lastAutoUrl.current === initialUrl) return;
+    lastAutoUrl.current = initialUrl;
+    setUrl(initialUrl);
+    handleFetch();
+  }, [initialUrl]);
+
+  const isWorking = state === 'loading' || state === 'downloading';
+
+  const PlatformIcon = platform === 'xiaoyuzhou' ? Radio : Headphones;
+
   return (
     <div className="space-y-5">
       {/* Input */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
-          {platform === 'xiaoyuzhou' ? <Radio className="w-4 h-4 text-emerald-500" /> : <Headphones className="w-4 h-4 text-purple-500" />}
-          {platform === 'unknown' ? t('podcast.link') : theme.name}
+          <PlatformIcon className={`w-4 h-4 ${platform === 'unknown' ? 'text-purple-500' : (platform === 'xiaoyuzhou' ? 'text-emerald-500' : 'text-purple-500')}`} />
+          {platform === 'unknown' ? t('podcast.link') : platformName}
         </label>
         <div className="flex gap-2">
           <div className="flex-1 relative">
@@ -139,8 +204,10 @@ export function PodcastSummary({ initialUrl }: Props) {
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !isWorking) handleFetch(); }}
+              readOnly={isLocked}
               placeholder={t('podcast.placeholder')}
-              className="w-full pl-10 pr-3 py-2 border border-gray-200/60 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-600/40 focus:border-transparent placeholder:text-gray-400/70"
+              className="w-full pl-10 pr-3 py-2 border border-gray-200/60 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-transparent placeholder:text-gray-400/70"
             />
           </div>
         </div>
@@ -153,14 +220,14 @@ export function PodcastSummary({ initialUrl }: Props) {
             placeholder={t('podcast.all')}
             min={1}
             max={500}
-            className="w-16 px-2 py-1 border border-gray-200/60 rounded text-xs text-center focus:outline-none focus:ring-1 focus:ring-brand-600/40 placeholder:text-gray-400/70"
+            className="w-16 px-2 py-1 border border-gray-200/60 rounded text-xs text-center focus:outline-none focus:ring-1 focus:ring-purple-500/40 placeholder:text-gray-400/70"
           />
           <label className="text-xs text-gray-500">{t('podcast.episodes')}</label>
           <div className="flex-1" />
           <button
             onClick={handleFetch}
-            disabled={!url || state === 'loading'}
-            className={`px-4 py-1.5 ${theme.accent} text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press`}
+            disabled={!url || isWorking}
+            className={`px-4 py-1.5 ${colors.accent} text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press flex-shrink-0`}
           >
             {state === 'loading' ? (
               <><Loader2 className="w-3 h-3 animate-spin" />{t('podcast.querying')}</>
@@ -173,60 +240,118 @@ export function PodcastSummary({ initialUrl }: Props) {
 
       {/* Podcast Info */}
       {podcast && (
-        <div className={`${theme.accentLight} border ${theme.border} rounded-lg p-3 flex items-center gap-3 shadow-soft`}>
-          {podcast.artworkUrl && (
-            <img src={podcast.artworkUrl} alt="" className="w-12 h-12 rounded-lg object-cover" />
-          )}
-          <div className="flex-1 min-w-0">
-            <p className={`text-sm font-medium ${theme.textDark} truncate`}>{podcast.name}</p>
-            <p className={`text-xs ${theme.textAccent}`}>
-              {podcast.artist}{podcast.artist && ' · '}<span className="font-mono tabular-nums">{episodes.length}</span> {t('podcast.episodes')}
-              <span className="text-gray-400 ml-1">via {theme.name}</span>
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Episode List */}
-      {episodes.length > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-600">
-              {t('podcast.selectedEpisodes', { selected: selected.size, total: episodes.length })}
-            </span>
-            <div className="flex gap-2 text-xs">
-              <button onClick={selectAll} className="text-brand-600 hover:underline">{t('selectAll')}</button>
-              <button onClick={selectNone} className="text-gray-400 hover:underline">{t('deselectAll')}</button>
+          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
+            <Info className={`w-4 h-4 ${colors.textAccent}`} />
+            {platformName}
+          </label>
+          <div className={`border ${colors.border} rounded-lg overflow-hidden shadow-soft`}>
+            <div className={`${colors.accentLight} p-3 flex items-center gap-3`}>
+              {podcast.artworkUrl && (
+                <img src={podcast.artworkUrl} alt="" className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium ${colors.textDark} truncate`}>{podcast.name}</p>
+                <p className={`text-xs ${colors.textAccent}`}>
+                  {podcast.artist}{podcast.artist && ' · '}
+                  <span className="font-mono tabular-nums">{episodes.length}</span> {t('podcast.episodes')}
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="max-h-48 overflow-y-auto border border-border-strong rounded-lg shadow-soft">
-            {episodes.map((ep) => (
-              <label
-                key={ep.id}
-                className="flex items-start gap-3 p-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors duration-150"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(ep.id)}
-                  onChange={() => toggleEpisode(ep.id)}
-                  className={`mt-1 rounded border-gray-300 ${theme.check} ${theme.ring}`}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-700 line-clamp-1">{ep.title}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {ep.releaseDate} {ep.durationMinutes > 0 && `· ${ep.durationMinutes} ${t('podcast.minutes')}`}
-                  </p>
+
+            {episodes.length > 0 && (
+              <>
+                <div className="flex items-center justify-between px-3 py-1.5 bg-white border-t border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setListExpanded(!listExpanded)}
+                      className="text-xs text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-0.5"
+                    >
+                      {listExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      {listExpanded ? '收起' : '展开'}
+                    </button>
+                    <span className="text-xs text-gray-500">
+                      {t('podcast.selectedEpisodes', { selected: selected.size, total: episodes.length })}
+                    </span>
+                  </div>
+                  <div className="flex gap-2 text-xs">
+                    <button onClick={selectAll} className={`${colors.textAccent} hover:underline`}>{t('selectAll')}</button>
+                    <button onClick={selectNone} className="text-gray-400 hover:underline">{t('deselectAll')}</button>
+                  </div>
                 </div>
-              </label>
-            ))}
+                {listExpanded && (
+                  <div className="overflow-y-auto bg-white" style={{ maxHeight: 192 }}>
+                    {episodes.map((ep) => (
+                      <label
+                        key={ep.id}
+                        className="flex items-start gap-3 p-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors duration-150"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected.has(ep.id)}
+                          onChange={() => toggleEpisode(ep.id)}
+                          className={`mt-1 rounded border-gray-300 ${colors.check} ${colors.ring}`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-700 line-clamp-1">{ep.title}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {ep.releaseDate} {ep.durationMinutes > 0 && `· ${ep.durationMinutes} ${t('podcast.minutes')}`}
+                          </p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* AI Polish toggle + Download */}
+      {/* Mind Map */}
+      {episodes.length > 0 && !showMindMap && (
+        <button
+          onClick={() => {
+            setShowMindMap(true);
+            const subtitleText = podcast
+              ? `标题：${podcast.name}\n艺术家：${podcast.artist || ''}\n\n` +
+                episodes.map(e => `【${e.title}】\n${e.description || ''}`).join('\n\n')
+              : '';
+            generateMindMap({ subtitleText, sourceTitle: podcast?.name });
+          }}
+          disabled={mindMapState === 'loading'}
+          className="w-full py-2 text-xs text-purple-500 hover:text-purple-600 hover:bg-purple-50 border border-purple-200/60 rounded-lg flex items-center justify-center gap-1.5 transition-colors duration-150 disabled:opacity-50"
+        >
+          {mindMapState === 'loading' ? (
+            <><Loader2 className="w-3 h-3 animate-spin" />{t('mindmap.generating')}</>
+          ) : (
+            <><Brain className="w-3 h-3" />{t('mindmap.generate')}</>
+          )}
+        </button>
+      )}
+      {showMindMap && (mindMapState === 'loading' || mindMapState === 'done') && (
+        <MindMap
+          text={mindMapText}
+          onClose={() => { setShowMindMap(false); setMindMapState('idle'); }}
+        />
+      )}
+      {showMindMap && mindMapState === 'error' && (
+        <div className="flex items-center gap-2 text-red-500 text-xs bg-red-50 border border-red-100/60 rounded-lg p-2">
+          <AlertCircle className="w-3 h-3 flex-shrink-0" />
+          {mindMapError}
+        </div>
+      )}
+
+      {/* Download Section */}
       {episodes.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
+          <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
+            <Download className={`w-4 h-4 ${colors.textAccent}`} />
+            {t('podcast.aiSummary')}
+          </label>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-gray-400">.mp3</span>
+            <div className="flex-1" />
             <span className="text-[11px] text-gray-500">{t('podcast.aiSummary')}</span>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -235,14 +360,13 @@ export function PodcastSummary({ initialUrl }: Props) {
                 onChange={(e) => setAiPolish(e.target.checked)}
                 className="sr-only peer"
               />
-              <div className={`w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-${theme.color}-500/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-${theme.color}-500`}></div>
+              <div className={`w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-purple-500/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:${colors.dot}`}></div>
             </label>
-            <div className="flex-1" />
           </div>
 
           {aiPolish && (
             <div>
-              <p className="text-[11px] text-gray-500 mb-1.5">{t('podcast.promptStyle')}</p>
+              <p className="text-xs font-medium text-gray-600 mb-1.5">{t('podcast.promptStyle')}</p>
               <div className="flex flex-wrap gap-1.5">
                 {PROMPT_STYLES.map((style) => (
                   <button
@@ -250,7 +374,7 @@ export function PodcastSummary({ initialUrl }: Props) {
                     onClick={() => setAiPromptStyle(style.value)}
                     className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
                       aiPromptStyle === style.value
-                        ? `${theme.accent} text-white`
+                        ? `${colors.accent} text-white`
                         : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
                     }`}
                     title={style.description}
@@ -262,7 +386,7 @@ export function PodcastSummary({ initialUrl }: Props) {
                   onClick={() => setAiPromptStyle('custom')}
                   className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
                     aiPromptStyle === 'custom'
-                      ? `${theme.accent} text-white`
+                      ? `${colors.accent} text-white`
                       : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
                   }`}
                 >
@@ -271,30 +395,64 @@ export function PodcastSummary({ initialUrl }: Props) {
               </div>
             </div>
           )}
-          
+
           <button
             onClick={handleDownload}
-            disabled={selected.size === 0 || state === 'downloading'}
-            className={`w-full py-2.5 ${theme.accent} text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press`}
+            disabled={selected.size === 0 || isWorking}
+            className={`w-full py-2.5 ${colors.accent} text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press`}
           >
             {state === 'downloading' ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                {t('podcast.downloading', { current: progress.current, total: progress.total })}
-                {progress.title && <span className="text-white/60 text-xs truncate max-w-[150px]">· {progress.title}</span>}
-              </>
-            ) : state === 'done' ? (
-              <>
-                <CheckCircle className="w-4 h-4" />
-                {t('podcast.downloadDone')}
-              </>
+              <><Loader2 className="w-4 h-4 animate-spin" />{t('podcast.downloading', { current: dlProgress?.current || 0, total: dlProgress?.total || 0 })}</>
             ) : (
-              <>
-                <Download className="w-4 h-4" />
-                {aiPolish ? '下载并总结' : t('podcast.downloadSelected', { count: selected.size })}
-              </>
+              <><Download className="w-4 h-4" />{t('podcast.downloadSelected', { count: selected.size })}</>
             )}
           </button>
+        </div>
+      )}
+
+      {/* Download Progress Overlay */}
+      {isLocked && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 w-[280px] text-center space-y-4 animate-fade-in">
+            <div className={`w-12 h-12 mx-auto rounded-full ${colors.accentLight} flex items-center justify-center`}>
+              <Download className={`w-6 h-6 ${colors.textAccent}`} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-800">正在下载播客…</p>
+              {dlProgress && (
+                <p className="text-xs text-gray-400 mt-1">
+                  {dlProgress.title || `${dlProgress.current}/${dlProgress.total}`}
+                </p>
+              )}
+            </div>
+            {dlProgress && dlProgress.total > 0 && (
+              <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className={`${colors.dot} h-1.5 rounded-full transition-all duration-500`}
+                  style={{ width: `${Math.round((dlProgress.current / dlProgress.total) * 100)}%` }}
+                />
+              </div>
+            )}
+            <div className={`flex items-center justify-center gap-1 ${colors.textAccent}`}>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span className="text-xs text-gray-400">处理中…</span>
+            </div>
+            <button
+              onClick={handleCancel}
+              className="w-full py-2 text-xs font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg border border-gray-200 transition-colors duration-150 flex items-center justify-center gap-1"
+            >
+              <X className="w-3 h-3" />
+              取消操作
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Done */}
+      {state === 'done' && doneMsg && (
+        <div className="flex items-center gap-2 text-green-600 text-sm bg-green-50 border border-green-100/60 rounded-lg p-3">
+          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+          {doneMsg}
         </div>
       )}
 
@@ -317,7 +475,6 @@ export function PodcastSummary({ initialUrl }: Props) {
           </ul>
         </div>
       )}
-
     </div>
   );
 }

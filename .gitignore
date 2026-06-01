@@ -28,6 +28,7 @@ coverage/
 
 # Misc
 *.zip
+youtube-transcript-api-master/
 dist-dev/
 
 # Screenshot build artifacts

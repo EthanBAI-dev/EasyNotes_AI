@@ -1,7 +1,7 @@
 /**
  * Bilibili service.
  * Extracts subtitles from Bilibili videos and series (合集/分P)
- * for download as Markdown files or direct import into NotebookLM.
+ * for download as Markdown files.
  *
  * Subtitle fetching uses FlowToLM's proven approach:
  *   view API (bvid → aid + cid) → WBI API (aid + cid → subtitle tracks) → download subtitle JSON

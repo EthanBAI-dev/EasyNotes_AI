@@ -2,11 +2,12 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Tv2, Youtube, Headphones } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
+import type { TranslationKey } from '@/lib/i18n';
 
 interface MediaDropdownProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
-  t: (key: string) => string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }
 
 export function MediaDropdown({ activeTab, onTabChange, t }: MediaDropdownProps) {

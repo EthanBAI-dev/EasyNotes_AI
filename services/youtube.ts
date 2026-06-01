@@ -1,7 +1,7 @@
 /**
  * YouTube service.
  * Extracts video URLs from YouTube videos, playlists, and channels
- * for batch import into NotebookLM (which natively parses YouTube URLs).
+ * for batch download.
  *
  * Supports:
  *   - Single video: youtube.com/watch?v=, youtu.be/, youtube.com/shorts/
@@ -12,7 +12,7 @@
  */
 
 import type { YouTubeVideoItem, YouTubeSourceInfo, YouTubeResult } from '@/lib/types';
-import { innertubeBrowse, fetchYouTubeText } from './youtube-tunnel';
+import { innertubeBrowse, innertubePlayer, fetchYouTubeText } from './youtube-tunnel';
 
 // ── URL Parsing ──
 
@@ -505,19 +505,14 @@ async function fetchVideoPageHtml(videoId: string): Promise<string> {
   return resp;
 }
 
-function extractPlayerResponse(html: string): Record<string, unknown> | null {
-  const match = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});/);
-  if (!match?.[1]) return null;
-  try {
-    return JSON.parse(match[1]);
-  } catch {
-    return null;
-  }
+function extractInnertubeApiKey(html: string): string | null {
+  const match = html.match(/"INNERTUBE_API_KEY"\s*:\s*"([a-zA-Z0-9_-]+)"/);
+  return match?.[1] || null;
 }
 
-function extractCaptionTracks(playerResponse: Record<string, unknown>): Array<{baseUrl: string; languageCode: string; name: {simpleText: string} }> | null {
+function extractCaptionTracks(data: Record<string, unknown>): Array<{baseUrl: string; languageCode: string; kind?: string; name: {simpleText: string} }> | null {
   try {
-    const captions = (playerResponse as any)?.captions?.playerCaptionsTracklistRenderer;
+    const captions = (data as any)?.captions?.playerCaptionsTracklistRenderer;
     if (!captions?.captionTracks?.length) return null;
     return captions.captionTracks;
   } catch {
@@ -525,22 +520,22 @@ function extractCaptionTracks(playerResponse: Record<string, unknown>): Array<{b
   }
 }
 
-function pickBestTrack(tracks: Array<{baseUrl: string; languageCode: string; name: {simpleText: string} }>): typeof tracks[0] | null {
+function pickBestTrack(tracks: Array<{baseUrl: string; languageCode: string; kind?: string; name: {simpleText: string} }>): typeof tracks[0] | null {
   if (!tracks.length) return null;
-  const autoTrack = tracks.find(t => t.languageCode === 'en' || t.name?.simpleText?.includes('auto-generated'));
-  if (autoTrack) return autoTrack;
-  const enTrack = tracks.find(t => t.languageCode?.startsWith('en'));
-  if (enTrack) return enTrack;
-  return tracks[0];
+  const manualTrack = tracks.find(t => t.kind !== 'asr');
+  const manualEn = tracks.find(t => t.kind !== 'asr' && t.languageCode?.startsWith('en'));
+  const autoEn = tracks.find(t => t.languageCode?.startsWith('en'));
+  const autoAny = tracks.find(t => t.languageCode === 'en' || t.name?.simpleText?.includes('auto-generated'));
+  return manualEn || manualTrack || autoEn || autoAny || tracks[0];
 }
 
 function parseTranscriptXml(xml: string): YouTubeTranscriptLine[] {
   const lines: YouTubeTranscriptLine[] = [];
-  const textRegex = /<text\s+start="([^"]*)"\s+dur="([^"]*)"[^>]*>([\s\S]*?)<\/text>/g;
+  const textRegex = /<text\s+start="([^"]*)"(?:\s+dur="([^"]*)")?[^>]*>([\s\S]*?)<\/text>/g;
   let match;
   while ((match = textRegex.exec(xml)) !== null) {
     const from = parseFloat(match[1]);
-    const dur = parseFloat(match[2]);
+    const dur = match[2] ? parseFloat(match[2]) : 2.0;
     const to = from + dur;
     const content = match[3]
       .replace(/&amp;/g, '&')
@@ -609,19 +604,17 @@ export async function fetchYouTubeTranscript(videoId: string): Promise<YouTubeSu
       rawTitle = titleMatch[1].replace(/ - YouTube$/, '').trim();
     }
 
-    const playerResponse = extractPlayerResponse(html);
-    let trackBaseUrl: string | undefined;
-
-    if (playerResponse) {
-      const tracks = extractCaptionTracks(playerResponse);
+    const apiKey = extractInnertubeApiKey(html);
+    if (apiKey) {
+      const playerData = await innertubePlayer(videoId, apiKey);
+      const tracks = extractCaptionTracks(playerData as Record<string, unknown>);
       if (tracks && tracks.length > 0) {
         const track = pickBestTrack(tracks);
-        trackBaseUrl = track?.baseUrl;
+        if (track?.baseUrl) {
+          const cleanUrl = track.baseUrl.replace(/&fmt=[^&]+/g, '').replace(/&tlang=[^&]+/g, '');
+          return await downloadAndParseTranscript(rawTitle, videoId, cleanUrl);
+        }
       }
-    }
-
-    if (trackBaseUrl) {
-      return await downloadAndParseTranscript(rawTitle, videoId, trackBaseUrl);
     }
   } catch {
     rawTitle = await fetchVideoTitleFallback(videoId);
@@ -643,20 +636,22 @@ async function fetchVideoTitleFallback(videoId: string): Promise<string> {
   return videoId;
 }
 
-const TIMEDTEXT_LANGS = ['en', 'en-US', 'zh-Hans', 'zh-Hant', 'zh', 'ja', 'ko', 'de', 'fr', 'es'];
+const TIMEDTEXT_LANGS = ['en', 'en-US', 'zh-Hans', 'zh-Hant', 'zh', 'ja', 'ko', 'de', 'fr', 'es', 'ru', 'pt', 'ar', 'hi'];
 
 async function tryTimedtextFallback(title: string, videoId: string): Promise<YouTubeSubtitleResult> {
   for (const lang of TIMEDTEXT_LANGS) {
     try {
-      const url = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=srv3`;
-      const resp = await fetch(url);
-      if (!resp.ok) continue;
-      const xml = await resp.text();
+      let xml: string;
+      try {
+        xml = await fetchYouTubeText(`/api/timedtext?v=${videoId}&lang=${lang}&fmt=srv1`);
+      } catch {
+        const resp = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=srv1`);
+        if (!resp.ok) continue;
+        xml = await resp.text();
+      }
       if (!xml || xml.includes('<transcript_list>')) continue;
-
       const lines = parseTranscriptXml(xml);
       if (lines.length === 0) continue;
-
       const markdown = buildYouTubeMarkdown(title, videoId, lines);
       return { success: true, title, videoId, markdown, lines };
     } catch {
@@ -669,7 +664,7 @@ async function tryTimedtextFallback(title: string, videoId: string): Promise<You
 
 async function downloadAndParseTranscript(title: string, videoId: string, baseUrl: string): Promise<YouTubeSubtitleResult> {
   try {
-    const resp = await fetch(`${baseUrl}&fmt=srv3`);
+    const resp = await fetch(`${baseUrl}&fmt=srv1`);
     if (!resp.ok) {
       return { success: false, title, videoId, markdown: '', lines: [], error: `字幕下载失败: HTTP ${resp.status}` };
     }

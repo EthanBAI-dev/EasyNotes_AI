@@ -4,7 +4,7 @@ import { ensureOffscreen, sendOffscreenMessage } from '@/services/offscreen';
 // Extract Claude conversation from current tab.
 // Content scripts return raw HTML fragments per message; we batch-convert them
 // to Markdown via the offscreen Turndown so structural formatting (paragraphs,
-// lists, blockquotes, bold) survives into both NotebookLM import and the
+// lists, blockquotes, bold) survives into the download and the
 // share-card renderer.
 export async function extractClaudeConversation(
   tabId: number
@@ -78,7 +78,7 @@ async function convertConversationContent(
   return { ...conv, messages, pairs };
 }
 
-// Format selected messages for import to NotebookLM
+// Format selected messages for download
 export function formatConversationForImport(
   conversation: ClaudeConversation,
   selectedMessageIds: string[]

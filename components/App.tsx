@@ -113,6 +113,7 @@ export default function App() {
         </div>
       </div>
 
+      <div id="tab-content-area" className="relative">
       <Tabs.Root value={activeTab} onValueChange={handleTabChange} className="flex flex-col">
         <Tabs.List className="flex glass border-b border-border px-2 gap-0.5" data-tour="tab-list">
           {/* Media Dropdown */}
@@ -198,6 +199,7 @@ export default function App() {
           <MorePanel onProgress={setImportProgress} />
         </Tabs.Content>
       </Tabs.Root>
+      </div>
 
       <OnboardingTour />
     </div>

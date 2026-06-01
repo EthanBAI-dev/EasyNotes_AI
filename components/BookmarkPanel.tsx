@@ -500,7 +500,7 @@ export function BookmarkPanel({ onProgress }: Props) {
       {/* Status messages */}
       {state === 'success' && (
         <div className="flex items-center gap-2 text-green-600 text-sm bg-green-50 rounded-lg p-3 shadow-soft border border-green-100">
-          <CheckCircle className="w-4 h-4" />{t('importSuccess')}
+          <CheckCircle className="w-4 h-4" />{t('downloadSuccess')}
         </div>
       )}
       {state === 'error' && (

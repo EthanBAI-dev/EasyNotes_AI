@@ -14,7 +14,7 @@ export interface BookmarkStore {
   collections: string[];
 }
 
-const STORAGE_KEY = 'nlm_bookmarks';
+const STORAGE_KEY = 'easynotes_bookmarks';
 const DEFAULT_COLLECTION = '默认收藏';
 
 function generateId(): string {

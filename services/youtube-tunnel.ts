@@ -190,6 +190,31 @@ export async function innertubeBrowse(body: object): Promise<unknown> {
   return JSON.parse(resp.body);
 }
 
+/** POST /youtubei/v1/player with ANDROID context, returns parsed JSON. */
+export async function innertubePlayer(videoId: string, apiKey: string): Promise<unknown> {
+  const body = {
+    videoId,
+    context: {
+      client: {
+        clientName: 'ANDROID',
+        clientVersion: '20.10.38',
+        hl: 'en',
+      },
+    },
+  };
+  const resp = await tunnelFetch(`/youtubei/v1/player?key=${apiKey}&prettyPrint=false`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    throw new Error(`InnerTube player failed: HTTP ${resp.status}`);
+  }
+  if (!resp.contentType?.includes('json')) {
+    throw new Error(`InnerTube player returned non-JSON: ${resp.contentType}`);
+  }
+  return JSON.parse(resp.body);
+}
+
 /** GET an arbitrary youtube.com path, returns the response body as text. */
 export async function fetchYouTubeText(path: string): Promise<string> {
   const resp = await tunnelFetch(path, { method: 'GET' });

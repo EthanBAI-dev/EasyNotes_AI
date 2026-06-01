@@ -1,6 +1,6 @@
 /**
  * User-facing settings. Stored in chrome.storage.local for consistency with
- * the rest of the extension (notebook cache, bookmarks, history all use local).
+ * the rest of the extension (bookmarks, history all use local).
  */
 
 export interface AISettings {
@@ -13,13 +13,13 @@ export interface AISettings {
 }
 
 export interface Settings {
-  /** Auto-rename sources NotebookLM names with a default placeholder like "Pasted Text". */
+  /** Auto-rename sources with default placeholder names like "Pasted Text". */
   autoRenamePastedSources: boolean;
   /** AI polish settings for subtitle/text processing */
   ai: AISettings;
 }
 
-const STORAGE_KEY = 'jetpackSettings';
+const STORAGE_KEY = 'easynotesSettings';
 
 const DEFAULTS: Settings = {
   autoRenamePastedSources: true,
