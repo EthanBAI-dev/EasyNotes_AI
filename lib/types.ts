@@ -57,6 +57,8 @@ export type MessageType =
   | { type: 'GET_BOOKMARKS' }
   | { type: 'GET_COLLECTIONS' }
   | { type: 'CREATE_COLLECTION'; name: string }
+  | { type: 'DELETE_COLLECTION'; name: string }
+  | { type: 'FETCH_PAGE_CONTENT'; url: string }
   | { type: 'IS_BOOKMARKED'; url: string };
 
 export type MessageResponse =

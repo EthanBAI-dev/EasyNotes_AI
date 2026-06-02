@@ -6,34 +6,32 @@ import {
   CheckCircle,
   AlertCircle,
   Trash2,
-  FileDown,
   Copy,
-  BookOpen,
   FolderPlus,
-  FolderInput,
-  ChevronDown,
-  ChevronUp,
   X,
-  Upload,
   Download,
+  Eye,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import type { ImportProgress } from '@/lib/types';
 import type { BookmarkItem } from '@/services/bookmarks';
 import { t } from '@/lib/i18n';
-
-interface PdfProgress {
-  current: number;
-  total: number;
-  title?: string;
-  phase?: string;
-  currentPage?: number;
-}
+import { PROMPT_STYLES } from '@/services/ai-polish';
+import { setOpState, clearOpState, getOpState } from '@/services/op-state';
 
 interface Props {
   onProgress: (progress: ImportProgress | null) => void;
 }
 
-type PanelState = 'idle' | 'loading' | 'exporting' | 'downloading' | 'success' | 'error';
+type PanelState = 'idle' | 'loading' | 'summarizing' | 'downloading' | 'success' | 'error';
+
+const OUTPUT_FORMATS = [
+  { value: 'md', label: '.md' },
+  { value: 'txt', label: '.txt' },
+] as const;
+
+type OutputFormat = typeof OUTPUT_FORMATS[number]['value'];
 
 export function BookmarkPanel({ onProgress }: Props) {
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
@@ -46,11 +44,15 @@ export function BookmarkPanel({ onProgress }: Props) {
   const [isCurrentBookmarked, setIsCurrentBookmarked] = useState(false);
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
-  const [pdfState, setPdfState] = useState<'idle' | 'fetching' | 'generating' | 'done' | 'copied'>('idle');
-  const [pdfProgress, setPdfProgress] = useState<PdfProgress | null>(null);
-  const [aiPolish, setAiPolish] = useState(false);
+  const [aiSummary, setAiSummary] = useState(true);
+  const [exportMode, setExportMode] = useState<'separate' | 'merged'>('merged');
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('md');
+  const [aiPromptStyle, setAiPromptStyle] = useState('summary');
+  const [summaryContent, setSummaryContent] = useState('');
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [copiedPreview, setCopiedPreview] = useState(false);
 
-  // Load bookmarks and current tab info
   useEffect(() => {
     loadData();
     loadCurrentTab();
@@ -123,98 +125,151 @@ export function BookmarkPanel({ onProgress }: Props) {
     });
   };
 
-  const handleExport = (mode: 'pdf' | 'clipboard') => {
-    const items = filteredBookmarks.filter((b) => selectedIds.has(b.id));
-    if (items.length === 0) return;
-
-    setPdfState('fetching');
-    setPdfProgress(null);
-    setError('');
-
-    const siteInfo = {
-      title: activeCollection === 'all' ? t('bookmark.collection') : activeCollection,
-      baseUrl: '',
-      framework: 'unknown' as const,
-      pages: items.map((b) => ({ url: b.url, title: b.title, path: b.url })),
-    };
-
-    const port = chrome.runtime.connect({ name: 'pdf-export' });
-    port.postMessage({ type: mode === 'clipboard' ? 'GENERATE_CLIPBOARD' : 'GENERATE_PDF', siteInfo });
-
-    port.onMessage.addListener(async (msg) => {
-      if (msg.phase === 'fetching') {
-        setPdfState('fetching');
-        setPdfProgress({ phase: 'fetching', current: msg.current, total: msg.total, currentPage: msg.currentPage });
-      } else if (msg.phase === 'rendering') {
-        setPdfState('generating');
-        setPdfProgress({ phase: 'rendering', current: 1, total: 1 });
-      } else if (msg.phase === 'clipboard') {
-        try {
-          await navigator.clipboard.writeText(msg.markdown);
-          setPdfState('copied');
-        } catch {
-          setState('error');
-          setError(t('clipboardFailed'));
-          setPdfState('idle');
-        }
-      } else if (msg.phase === 'done') {
-        if (mode === 'pdf') setPdfState('done');
-        port.disconnect();
-      } else if (msg.phase === 'error') {
-        setState('error');
-        setError(msg.error || t('pdfFailed'));
-        setPdfState('idle');
-        port.disconnect();
-      }
-    });
-
-    port.onDisconnect.addListener(() => {
-      if (pdfState !== 'done' && pdfState !== 'copied') setPdfState('done');
+  const handleDeleteCollection = (name: string) => {
+    if (name === '默认收藏') return;
+    chrome.runtime.sendMessage({ type: 'DELETE_COLLECTION', name }, () => {
+      if (activeCollection === name) setActiveCollection('all');
+      deselectAll();
+      loadData();
     });
   };
 
-  const handleExportBookmarks = async () => {
+  const fetchPageContent = (url: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'FETCH_PAGE_CONTENT', url }, (resp) => {
+        if (resp?.success) {
+          const data = resp.data as { markdown: string; title: string };
+          resolve(data.markdown || '');
+        } else {
+          reject(new Error(resp?.error || '抓取页面内容失败'));
+        }
+      });
+    });
+  };
+
+  const handleGenerateSummary = async () => {
     const items = filteredBookmarks.filter((b) => selectedIds.has(b.id));
     if (items.length === 0) return;
 
-    setState('exporting');
+    setState('summarizing');
     setError('');
+    setSummaryContent('');
+    setShowPreview(false);
 
-    const lines = ['# 书签导出', '', ''];
-    for (const b of items) {
-      lines.push(`- [${b.title}](${b.url})`);
-    }
-    lines.push('', `共 ${items.length} 个书签`);
+    await setOpState({
+      active: true,
+      phase: 'downloading',
+      kind: 'export',
+      current: 0,
+      total: items.length,
+      title: items[0]?.title || '',
+      timestamp: Date.now(),
+    });
 
-    let markdown = lines.join('\n');
-    
-    if (aiPolish) {
-      try {
-        const { polishSubtitlesWithChunks } = await import('@/services/ai-polish');
-        const polished = await polishSubtitlesWithChunks(markdown, undefined, (current, total) => {
-          console.log(`AI 润色进度: ${current}/${total}`);
-        });
-        
-        if (polished.success) {
-          markdown = polished.polished;
-        } else {
-          setState('error');
-          setError(polished.error || 'AI 润色失败');
+    try {
+      const pageContents: { title: string; url: string; content: string }[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const stillActive = await getOpState();
+        if (!stillActive) {
+          setState('idle');
           return;
         }
-      } catch (err) {
+        try {
+          const content = await fetchPageContent(items[i].url);
+          if (content) {
+            pageContents.push({ title: items[i].title, url: items[i].url, content });
+          }
+        } catch {
+          // Individual page fetch failure is non-fatal
+        }
+        setOpState({
+          active: true,
+          phase: 'downloading',
+          kind: 'export',
+          current: i + 1,
+          total: items.length,
+          title: items[i].title,
+          timestamp: Date.now(),
+        });
+      }
+
+      if (pageContents.length === 0) {
         setState('error');
-        setError(err instanceof Error ? err.message : 'AI 润色处理失败');
+        setError('所有页面内容抓取失败');
         return;
       }
+
+      let combinedText: string;
+      if (exportMode === 'merged' || pageContents.length === 1) {
+        const sections = pageContents.map((p) => `## ${p.title}\n\n> ${p.url}\n\n${p.content}`);
+        combinedText = sections.join('\n\n---\n\n');
+      } else {
+        combinedText = pageContents.map((p) => `# ${p.title}\n\n> ${p.url}\n\n${p.content}`).join('\n\n');
+      }
+
+      if (aiSummary) {
+        const { polishSubtitlesWithChunks } = await import('@/services/ai-polish');
+        const result = await polishSubtitlesWithChunks(combinedText, undefined, undefined, aiPromptStyle);
+
+        if (result.success) {
+          setSummaryContent(result.polished);
+        } else {
+          setState('error');
+          setError(result.error || 'AI 总结失败');
+          clearOpState();
+          return;
+        }
+      } else {
+        setSummaryContent(combinedText);
+      }
+
+      setState('idle');
+      setShowPreview(true);
+      clearOpState();
+    } catch (err) {
+      setState('error');
+      setError(err instanceof Error ? err.message : 'AI 总结处理失败');
+      clearOpState();
+    }
+  };
+
+  const handleDownloadSummary = () => {
+    if (!summaryContent) return;
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const collectionName = activeCollection === 'all' ? 'web_summary' : activeCollection.replace(/[\\/:*?"<>|]/g, '_');
+    const ext = outputFormat === 'txt' ? 'txt' : 'md';
+    const filename = `${collectionName}_${timestamp}.${ext}`;
+
+    let downloadContent = summaryContent;
+    if (outputFormat === 'txt') {
+      downloadContent = summaryContent
+        .replace(/#{1,6}\s+/g, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/^>\s?/gm, '');
     }
 
-    const filename = `bookmarks_export.md`;
-    const encoded = btoa(unescape(encodeURIComponent(markdown)));
-    const dataUrl = `data:text/markdown;base64,${encoded}`;
-    await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
+    const mimeType = outputFormat === 'txt' ? 'text/plain' : 'text/markdown';
+    const encoded = btoa(unescape(encodeURIComponent(downloadContent)));
+    const dataUrl = `data:${mimeType};base64,${encoded}`;
+    chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
     setState('success');
     setTimeout(() => setState('idle'), 3000);
+  };
+
+  const handleCopySummary = async () => {
+    if (!summaryContent) return;
+    try {
+      await navigator.clipboard.writeText(summaryContent);
+      setCopiedPreview(true);
+      setTimeout(() => setCopiedPreview(false), 2000);
+    } catch {
+      setError('复制失败');
+    }
   };
 
   const toggleSelect = (id: string) => {
@@ -279,22 +334,21 @@ export function BookmarkPanel({ onProgress }: Props) {
         </div>
       )}
 
-      {/* Collection tabs */}
-      {collections.length > 0 && (
-        <div className="flex items-center gap-1 overflow-x-auto">
-          <button
-            onClick={() => { setActiveCollection('all'); deselectAll(); }}
-            className={`btn-press px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors ${
-              activeCollection === 'all' ? 'bg-brand-600 text-white shadow-sm' : 'bg-gray-100/60 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            {t('bookmark.all')} ({bookmarks.length})
-          </button>
-          {collections.map((col) => {
-            const count = bookmarks.filter((b) => b.collection === col).length;
-            return (
+      {/* Collection tabs — "all" is always visible */}
+      <div className="flex items-center gap-1 overflow-x-auto flex-wrap">
+        <button
+          onClick={() => { setActiveCollection('all'); deselectAll(); }}
+          className={`btn-press px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors ${
+            activeCollection === 'all' ? 'bg-brand-600 text-white shadow-sm' : 'bg-gray-100/60 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          {t('bookmark.all')} ({bookmarks.length})
+        </button>
+        {collections.map((col) => {
+          const count = bookmarks.filter((b) => b.collection === col).length;
+          return (
+            <div key={col} className="flex items-center">
               <button
-                key={col}
                 onClick={() => { setActiveCollection(col); deselectAll(); }}
                 className={`btn-press px-2.5 py-1 text-xs rounded-full whitespace-nowrap transition-colors ${
                   activeCollection === col ? 'bg-brand-600 text-white shadow-sm' : 'bg-gray-100/60 text-gray-600 hover:bg-gray-200'
@@ -302,17 +356,26 @@ export function BookmarkPanel({ onProgress }: Props) {
               >
                 {col} ({count})
               </button>
-            );
-          })}
-          <button
-            onClick={() => setShowNewCollection(!showNewCollection)}
-            className="btn-press p-1 text-gray-400 hover:text-gray-600 rounded"
-            title={t('bookmark.newCollection')}
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
+              {col !== '默认收藏' && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteCollection(col); }}
+                  className="btn-press ml-0.5 p-0.5 text-gray-300 hover:text-red-500 rounded-full"
+                  title="删除分组"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+        <button
+          onClick={() => setShowNewCollection(!showNewCollection)}
+          className="btn-press p-1 text-gray-400 hover:text-gray-600 rounded"
+          title={t('bookmark.newCollection')}
+        >
+          <FolderPlus className="w-3.5 h-3.5" />
+        </button>
+      </div>
 
       {/* New collection input */}
       {showNewCollection && (
@@ -405,71 +468,185 @@ export function BookmarkPanel({ onProgress }: Props) {
             ))}
           </div>
 
-          {/* Action buttons */}
+          {/* Output Mode — single unified section */}
           {selectedIds.size > 0 && (
-            <div className="space-y-2">
-              {/* AI Polish toggle */}
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-gray-500">{t('youtube.aiPolish')}</span>
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                <Download className="w-4 h-4 text-brand-600" />
+                {t('youtube.outputMode')}
+              </label>
+              <div className="flex items-center gap-1.5">
+                {selectedIds.size > 1 && (
+                  <div className="flex rounded-lg border border-gray-200/60 overflow-hidden">
+                    <button
+                      onClick={() => setExportMode('separate')}
+                      className={`px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 ${
+                        exportMode === 'separate'
+                          ? 'bg-brand-600 text-white'
+                          : 'bg-white text-gray-400 hover:text-gray-500'
+                      }`}
+                    >
+                      Split
+                    </button>
+                    <button
+                      onClick={() => setExportMode('merged')}
+                      className={`px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 border-l border-gray-200/60 ${
+                        exportMode === 'merged'
+                          ? 'bg-brand-600 text-white'
+                          : 'bg-white text-gray-400 hover:text-gray-500'
+                      }`}
+                    >
+                      Merged
+                    </button>
+                  </div>
+                )}
+                <select
+                  value={outputFormat}
+                  onChange={(e) => setOutputFormat(e.target.value as OutputFormat)}
+                  className="text-[11px] border border-gray-200/60 rounded-lg px-2 py-1 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-600/40"
+                >
+                  {OUTPUT_FORMATS.map((f) => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+                <div className="flex-1" />
+                <span className="text-[11px] text-gray-500">AI Summary</span>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={aiPolish}
-                    onChange={(e) => setAiPolish(e.target.checked)}
+                    checked={aiSummary}
+                    onChange={(e) => setAiSummary(e.target.checked)}
                     className="sr-only peer"
                   />
                   <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-brand-600/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
                 </label>
-                <div className="flex-1" />
               </div>
 
-              {pdfState === 'fetching' || pdfState === 'generating' ? (
-                <button
-                  disabled
-                  className="btn-press w-full py-2 bg-emerald-500 text-white text-sm rounded-lg disabled:opacity-70 flex items-center justify-center gap-2"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {pdfState === 'fetching'
-                    ? t('pdfFetching', { current: pdfProgress?.current || 0, total: pdfProgress?.total || selectedIds.size })
-                    : t('pdfGeneratingSimple')}
-                </button>
-              ) : pdfState === 'done' || pdfState === 'copied' ? (
-                <p className="text-sm text-emerald-600 flex items-center justify-center gap-1.5 py-1">
-                  <CheckCircle className="w-4 h-4" />
-                  {pdfState === 'copied' ? t('clipboardCopied') : t('pdfDownloaded')}
-                </p>
-              ) : (
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => handleExport('pdf')}
-                    disabled={state === 'exporting'}
-                    className="btn-press flex-1 py-2 bg-emerald-500 text-white text-sm rounded-lg hover:bg-emerald-500/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-btn hover:shadow-btn-hover transition-all duration-150"
-                  >
-                    <FileDown className="w-4 h-4" />
-                    {t('downloadPdf')}
-                  </button>
-                  <button
-                    onClick={() => handleExport('clipboard')}
-                    disabled={state === 'exporting'}
-                    className="btn-press py-2 px-2.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-500/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-btn hover:shadow-btn-hover transition-all duration-150"
-                    title={t('copyToClipboard')}
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
+              {aiSummary && (
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1.5">{t('youtube.promptStyle')}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PROMPT_STYLES.map((style) => (
+                      <button
+                        key={style.value}
+                        onClick={() => setAiPromptStyle(style.value)}
+                        className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                          aiPromptStyle === style.value
+                            ? 'bg-brand-600 text-white border-brand-600'
+                            : 'bg-white text-gray-500 border-gray-200 hover:border-brand-300 hover:text-brand-600'
+                        }`}
+                        title={style.description}
+                      >
+                        {style.label}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setAiPromptStyle('custom')}
+                      className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                        aiPromptStyle === 'custom'
+                          ? 'bg-brand-600 text-white border-brand-600'
+                          : 'bg-white text-gray-500 border-gray-200 hover:border-brand-300 hover:text-brand-600'
+                      }`}
+                    >
+                      Custom
+                    </button>
+                  </div>
                 </div>
               )}
 
               <button
-                onClick={handleExportBookmarks}
-                disabled={state === 'exporting' || pdfState === 'fetching' || pdfState === 'generating'}
-                className="btn-press w-full py-2 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-600/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150"
+                onClick={handleGenerateSummary}
+                disabled={state === 'summarizing'}
+                className={`btn-press w-full py-2.5 text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 ${state === 'summarizing' ? 'bg-brand-600/70' : 'bg-brand-600 hover:bg-brand-600/90'}`}
               >
-                {state === 'exporting' ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" />导出中...</>
+                {state === 'summarizing' ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" />AI 总结生成中…</>
                 ) : (
-                  <><Download className="w-4 h-4" />{aiPolish ? '导出润色版' : '导出书签列表'}（{selectedIds.size}）</>
+                  <><Download className="w-4 h-4" />{aiSummary ? '生成 AI 总结' : '获取页面内容'}（{selectedIds.size}）</>
                 )}
               </button>
+            </div>
+          )}
+
+          {/* Summary Preview */}
+          {showPreview && summaryContent && (
+            <div className="space-y-2 bg-surface-sunken rounded-xl border border-gray-200/60 overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100/60 bg-white/60">
+                <div className="flex items-center gap-2">
+                  <Eye className="w-3.5 h-3.5 text-brand-600" />
+                  <span className="text-xs font-medium text-gray-700">AI 总结预览</span>
+                </div>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={handleCopySummary}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                    title="复制内容"
+                  >
+                    {copiedPreview ? (
+                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setPreviewExpanded(!previewExpanded)}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                    title={previewExpanded ? '收起' : '展开'}
+                  >
+                    {previewExpanded ? (
+                      <Minimize2 className="w-3.5 h-3.5" />
+                    ) : (
+                      <Maximize2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => { setShowPreview(false); setSummaryContent(''); }}
+                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                    title="关闭预览"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              <div
+                className={`overflow-y-auto px-3 py-2 ${
+                  previewExpanded ? 'max-h-[400px]' : 'max-h-[180px]'
+                } transition-all duration-200`}
+              >
+                <pre className="text-xs text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
+                  {summaryContent}
+                </pre>
+              </div>
+              <div className="flex gap-1.5 px-3 py-2 border-t border-gray-100/60 bg-white/60">
+                <button
+                  onClick={() => setOutputFormat('md')}
+                  className={`px-3 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                    outputFormat === 'md'
+                      ? 'bg-brand-600 text-white border-brand-600'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-brand-300 hover:text-brand-600'
+                  }`}
+                >
+                  .md
+                </button>
+                <button
+                  onClick={() => setOutputFormat('txt')}
+                  className={`px-3 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                    outputFormat === 'txt'
+                      ? 'bg-brand-600 text-white border-brand-600'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-brand-300 hover:text-brand-600'
+                  }`}
+                >
+                  .txt
+                </button>
+                <div className="flex-1" />
+                <button
+                  onClick={handleDownloadSummary}
+                  className="btn-press px-4 py-1 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-600/90 flex items-center gap-1.5 shadow-btn hover:shadow-btn-hover transition-all duration-150"
+                >
+                  <Download className="w-3 h-3" />
+                  下载 {outputFormat === 'txt' ? '.txt' : '.md'}
+                </button>
+              </div>
             </div>
           )}
         </>
@@ -507,9 +684,6 @@ export function BookmarkPanel({ onProgress }: Props) {
         <div className="flex items-center gap-2 text-red-500 text-sm bg-red-50 rounded-lg p-3 shadow-soft border border-red-100">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
         </div>
-      )}
-      {pdfState === 'done' && (
-        <p className="text-xs text-emerald-600 text-center">{t('bookmark.pdfSaved')}</p>
       )}
 
     </div>

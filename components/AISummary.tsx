@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { ClaudeConversation, ImportProgress } from '@/lib/types';
 import { t } from '@/lib/i18n';
+import { PROMPT_STYLES } from '@/services/ai-polish';
 
 interface Props {
   onProgress: (progress: ImportProgress | null) => void;
@@ -34,8 +35,6 @@ function detectPlatform(url: string) {
   }
 }
 
-// Lightweight markdown stripper for popup previews — pair.answer is now full
-// Markdown, so symbols like **, ##, > would otherwise leak into the preview.
 function stripMarkdown(md: string): string {
   return md
     .replace(/```[\s\S]*?```/g, ' ')
@@ -59,7 +58,8 @@ export function AISummary({ onProgress }: Props) {
   const [selectedPairIds, setSelectedPairIds] = useState<Set<string>>(new Set());
   const [platformInfo, setPlatformInfo] = useState<ReturnType<typeof detectPlatform>>(null);
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
-  const [aiPolish, setAiPolish] = useState(false);
+  const [aiSummary, setAiSummary] = useState(true);
+  const [aiPromptStyle, setAiPromptStyle] = useState('summary');
 
   const [autoExtracted, setAutoExtracted] = useState(false);
 
@@ -106,7 +106,6 @@ export function AISummary({ onProgress }: Props) {
     );
   }, [currentTabId, platformInfo]);
 
-  // Auto-extract when on a specific conversation page (not homepage)
   useEffect(() => {
     if (!currentTabId || !platformInfo || autoExtracted || state !== 'idle') return;
     chrome.tabs.get(currentTabId, (tab) => {
@@ -143,23 +142,23 @@ export function AISummary({ onProgress }: Props) {
 
     let markdown = lines.join('\n');
     
-    if (aiPolish) {
+    if (aiSummary) {
       try {
         const { polishSubtitlesWithChunks } = await import('@/services/ai-polish');
         const polished = await polishSubtitlesWithChunks(markdown, undefined, (current, total) => {
-          console.log(`AI 润色进度: ${current}/${total}`);
-        });
+          console.log(`AI 总结进度: ${current}/${total}`);
+        }, aiPromptStyle);
         
         if (polished.success) {
           markdown = polished.polished;
         } else {
           setState('error');
-          setError(polished.error || 'AI 润色失败');
+          setError(polished.error || 'AI 总结失败');
           return;
         }
       } catch (err) {
         setState('error');
-        setError(err instanceof Error ? err.message : 'AI 润色处理失败');
+        setError(err instanceof Error ? err.message : 'AI 总结处理失败');
         return;
       }
     }
@@ -203,7 +202,6 @@ export function AISummary({ onProgress }: Props) {
   const pairs = conversation?.pairs || [];
   const allSelected = pairs.length > 0 && selectedPairIds.size === pairs.length;
 
-  // Not on a supported AI platform — show onboarding guide
   if (!platformInfo) {
     return (
       <div className="space-y-4">
@@ -240,7 +238,6 @@ export function AISummary({ onProgress }: Props) {
     );
   }
 
-  // Initial / extracting state
   if (state === 'idle' || state === 'extracting' || (state === 'error' && !conversation)) {
     return (
       <div className="space-y-4">
@@ -277,7 +274,6 @@ export function AISummary({ onProgress }: Props) {
     );
   }
 
-  // Ready state — show Q&A pairs
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -347,42 +343,80 @@ export function AISummary({ onProgress }: Props) {
         ))}
       </div>
 
-      {/* AI Polish toggle */}
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] text-gray-500">{t('youtube.aiPolish')}</span>
-        <label className="relative inline-flex items-center cursor-pointer">
-          <input
-            type="checkbox"
-            checked={aiPolish}
-            onChange={(e) => setAiPolish(e.target.checked)}
-            className="sr-only peer"
-          />
-          <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-brand-600/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+      {/* Output Mode controls with toggle switch */}
+      <div className="space-y-3">
+        <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
+          <Download className="w-4 h-4 text-brand-600" />
+          {t('youtube.outputMode')}
         </label>
-        <div className="flex-1" />
-      </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-gray-400">.md</span>
+          <div className="flex-1" />
+          <span className="text-[11px] text-gray-500">AI Summary</span>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={aiSummary}
+              onChange={(e) => setAiSummary(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-brand-600/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+          </label>
+        </div>
 
-      {/* Action buttons */}
-      <div className="flex gap-2">
-        <button
-          onClick={handleDownload}
-          disabled={state === 'downloading' || selectedPairIds.size === 0}
-          className="flex-1 py-2.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-600/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
-        >
-          {state === 'downloading' ? (
-            <><Loader2 className="w-4 h-4 animate-spin" />{t('claude.importingBtn')}</>
-          ) : (
-            <><Download className="w-4 h-4" />{aiPolish ? '下载润色版' : '下载 Markdown'}（{selectedPairIds.size}）</>
-          )}
-        </button>
-        <button
-          onClick={handleShareCard}
-          disabled={state === 'downloading' || selectedPairIds.size === 0}
-          className="py-2.5 px-4 bg-amber-500 text-white text-sm rounded-lg hover:bg-amber-500/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
-          title={t('claude.shareCard')}
-        >
-          <Share2 className="w-4 h-4" />
-        </button>
+        {aiSummary && (
+          <div>
+            <p className="text-xs font-medium text-gray-600 mb-1.5">{t('youtube.promptStyle')}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {PROMPT_STYLES.map((style) => (
+                <button
+                  key={style.value}
+                  onClick={() => setAiPromptStyle(style.value)}
+                  className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                    aiPromptStyle === style.value
+                      ? 'bg-brand-600 text-white border-brand-600'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-brand-300 hover:text-brand-600'
+                  }`}
+                  title={style.description}
+                >
+                  {style.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setAiPromptStyle('custom')}
+                className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
+                  aiPromptStyle === 'custom'
+                    ? 'bg-brand-600 text-white border-brand-600'
+                    : 'bg-white text-gray-500 border-gray-200 hover:border-brand-300 hover:text-brand-600'
+                }`}
+              >
+                Custom
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleDownload}
+            disabled={state === 'downloading' || selectedPairIds.size === 0}
+            className="flex-1 py-2.5 bg-brand-600 text-white text-sm rounded-lg hover:bg-brand-600/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
+          >
+            {state === 'downloading' ? (
+              <><Loader2 className="w-4 h-4 animate-spin" />{t('claude.importingBtn')}</>
+            ) : (
+              <><Download className="w-4 h-4" />{aiSummary ? '下载 AI 总结' : '下载 Markdown'}（{selectedPairIds.size}）</>
+            )}
+          </button>
+          <button
+            onClick={handleShareCard}
+            disabled={state === 'downloading' || selectedPairIds.size === 0}
+            className="py-2.5 px-4 bg-amber-500 text-white text-sm rounded-lg hover:bg-amber-500/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
+            title={t('claude.shareCard')}
+          >
+            <Share2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Status */}

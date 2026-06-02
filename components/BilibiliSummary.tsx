@@ -8,6 +8,7 @@ import { getOpState, clearOpState } from '@/services/op-state';
 import { PROMPT_STYLES } from '@/services/ai-polish';
 import { getSettings } from '@/lib/settings';
 import { MindMap, useMindMapGenerator } from '@/components/MindMap';
+import { DownloadOverlay } from '@/components/DownloadOverlay';
 import { fetchVideoSubtitle, mergeBilibiliSubtitles } from '@/services/bilibili';
 
 type State = 'idle' | 'loading' | 'loaded' | 'fetching' | 'downloading' | 'done' | 'error';
@@ -69,7 +70,7 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
   const [fetchMode, setFetchMode] = useState<FetchMode>('single');
   const [exportMode, setExportMode] = useState<ExportMode>('merged');
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('md');
-  const [aiPolish, setAiPolish] = useState(false);
+  const [aiPolish, setAiPolish] = useState(true);
   const [aiPromptStyle, setAiPromptStyle] = useState('smooth');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [listHeight, setListHeight] = useState(144);
@@ -633,40 +634,16 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
       )}
 
       {isLocked && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 w-[280px] text-center space-y-4 animate-fade-in">
-            <div className="w-12 h-12 mx-auto rounded-full bg-[#00a1d6]/10 flex items-center justify-center">
-              <Download className="w-6 h-6 text-[#00a1d6]" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-800">正在导出字幕…</p>
-              {dlProgress && (
-                <p className="text-xs text-gray-400 mt-1">
-                  {dlProgress.title || `${dlProgress.current}/${dlProgress.total}`}
-                </p>
-              )}
-            </div>
-            {dlProgress && dlProgress.total > 0 && (
-              <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="bg-[#00a1d6] h-1.5 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.round((dlProgress.current / dlProgress.total) * 100)}%` }}
-                />
-              </div>
-            )}
-            <div className="flex items-center justify-center gap-1 text-[#00a1d6]">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span className="text-xs text-gray-400">处理中…</span>
-            </div>
-            <button
-              onClick={handleCancel}
-              className="w-full py-2 text-xs font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg border border-gray-200 transition-colors duration-150 flex items-center justify-center gap-1"
-            >
-              <X className="w-3 h-3" />
-              取消操作
-            </button>
-          </div>
-        </div>
+        <DownloadOverlay
+          title="正在导出字幕…"
+          detail={dlProgress?.title || (dlProgress ? `${dlProgress.current}/${dlProgress.total}` : '')}
+          current={dlProgress?.current || 0}
+          total={dlProgress?.total || 0}
+          iconColor="#00a1d6"
+          iconBgColor="rgb(0 161 214 / 0.1)"
+          progressColor="#00a1d6"
+          onCancel={handleCancel}
+        />
       )}
 
       {state === 'done' && doneMsg && (

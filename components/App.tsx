@@ -13,6 +13,7 @@ import { getOpState } from '@/services/op-state';
 import { LayersIcon } from '@/components/LayersIcon';
 import { MorePanel } from '@/components/MorePanel';
 import { BookmarkPanel } from '@/components/BookmarkPanel';
+import { DownloadProgress } from '@/components/DownloadProgress';
 import { OnboardingTour } from '@/components/OnboardingTour';
 import { MediaDropdown } from '@/components/MediaDropdown';
 
@@ -202,6 +203,7 @@ export default function App() {
       </div>
 
       <OnboardingTour />
+      <DownloadProgress />
     </div>
   );
 }

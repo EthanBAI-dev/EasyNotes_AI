@@ -13,6 +13,7 @@ import {
 import type { BilibiliVideoItem, BilibiliSourceInfo } from '@/services/bilibili';
 import { polishSubtitlesWithChunks } from '@/services/ai-polish';
 import { setOpState, clearOpState } from '@/services/op-state';
+import { ensureOffscreen, sendOffscreenMessage } from '@/services/offscreen';
 import JSZip from 'jszip';
 import type { PodcastInfo, PodcastEpisode } from '@/services/podcast';
 
@@ -27,6 +28,7 @@ import {
   getBookmarks,
   getCollections,
   createCollection,
+  deleteCollection,
   isBookmarked,
 } from '@/services/bookmarks';
 import type { MessageType, MessageResponse } from '@/lib/types';
@@ -397,6 +399,23 @@ async function handleMessage(message: MessageType): Promise<unknown> {
     return { success: true };
   }
 
+  if (type === 'FETCH_PAGE_CONTENT') {
+    const { url: fetchUrl } = message as { url: string };
+    const resp = await fetch(fetchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    const html = await resp.text();
+    await ensureOffscreen();
+    const result = await sendOffscreenMessage<{ success: boolean; markdown: string; title: string }>({
+      type: 'HTML_TO_MARKDOWN',
+      html,
+    });
+    return { markdown: result.markdown, title: result.title };
+  }
+
   switch (message.type) {
     case 'PARSE_RSS':
       return await parseRssFeed(message.rssUrl);
@@ -445,6 +464,10 @@ async function handleMessage(message: MessageType): Promise<unknown> {
 
     case 'CREATE_COLLECTION':
       await createCollection(message.name);
+      return true;
+
+    case 'DELETE_COLLECTION':
+      await deleteCollection(message.name);
       return true;
 
     case 'MOVE_BOOKMARK':

@@ -6,6 +6,7 @@ import { getOpState, clearOpState } from '@/services/op-state';
 import { PROMPT_STYLES } from '@/services/ai-polish';
 import { getSettings } from '@/lib/settings';
 import { MindMap, useMindMapGenerator } from '@/components/MindMap';
+import { DownloadOverlay } from '@/components/DownloadOverlay';
 
 type State = 'idle' | 'loading' | 'loaded' | 'downloading' | 'done' | 'error';
 type Platform = 'unknown' | 'apple' | 'xiaoyuzhou';
@@ -41,7 +42,7 @@ export function PodcastSummary({ initialUrl }: Props) {
   const [doneMsg, setDoneMsg] = useState('');
   const [listExpanded, setListExpanded] = useState(true);
 
-  const [aiPolish, setAiPolish] = useState(false);
+  const [aiPolish, setAiPolish] = useState(true);
   const [aiPromptStyle, setAiPromptStyle] = useState('smooth');
   const [dlProgress, setDlProgress] = useState<{ current: number; total: number; title?: string } | null>(null);
   const abortRef = useRef<{ port?: chrome.runtime.Port; cancel: () => void }>({ cancel: () => {} });
@@ -412,40 +413,16 @@ export function PodcastSummary({ initialUrl }: Props) {
 
       {/* Download Progress Overlay */}
       {isLocked && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 w-[280px] text-center space-y-4 animate-fade-in">
-            <div className={`w-12 h-12 mx-auto rounded-full ${colors.accentLight} flex items-center justify-center`}>
-              <Download className={`w-6 h-6 ${colors.textAccent}`} />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-800">正在下载播客…</p>
-              {dlProgress && (
-                <p className="text-xs text-gray-400 mt-1">
-                  {dlProgress.title || `${dlProgress.current}/${dlProgress.total}`}
-                </p>
-              )}
-            </div>
-            {dlProgress && dlProgress.total > 0 && (
-              <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className={`${colors.dot} h-1.5 rounded-full transition-all duration-500`}
-                  style={{ width: `${Math.round((dlProgress.current / dlProgress.total) * 100)}%` }}
-                />
-              </div>
-            )}
-            <div className={`flex items-center justify-center gap-1 ${colors.textAccent}`}>
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span className="text-xs text-gray-400">处理中…</span>
-            </div>
-            <button
-              onClick={handleCancel}
-              className="w-full py-2 text-xs font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg border border-gray-200 transition-colors duration-150 flex items-center justify-center gap-1"
-            >
-              <X className="w-3 h-3" />
-              取消操作
-            </button>
-          </div>
-        </div>
+        <DownloadOverlay
+          title="正在下载播客…"
+          detail={dlProgress?.title || (dlProgress ? `${dlProgress.current}/${dlProgress.total}` : '')}
+          current={dlProgress?.current || 0}
+          total={dlProgress?.total || 0}
+          iconColor={platform === 'xiaoyuzhou' ? '#059669' : '#9333ea'}
+          iconBgColor={platform === 'xiaoyuzhou' ? 'rgb(5 150 105 / 0.1)' : 'rgb(147 51 234 / 0.1)'}
+          progressColor={platform === 'xiaoyuzhou' ? '#059669' : '#9333ea'}
+          onCancel={handleCancel}
+        />
       )}
 
       {/* Done */}

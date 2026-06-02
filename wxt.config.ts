@@ -36,6 +36,7 @@ export default defineConfig({
       'sidePanel',
     ],
     host_permissions: [
+      '<all_urls>',
       'https://claude.ai/*',
       'https://platform.claude.com/*',
       'https://www.youtube.com/*',
