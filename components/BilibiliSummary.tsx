@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Tv2, Loader2, CheckCircle, AlertCircle, ChevronDown, ChevronUp, Download, User, PlayCircle, Heart, Layers, X, Info, Brain } from 'lucide-react';
+import { Tv2, Loader2, CheckCircle, AlertCircle, ChevronDown, ChevronUp, ChevronRight, Download, User, PlayCircle, Heart, Layers, X, Info, Brain } from 'lucide-react';
 import type { ImportProgress } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { isBilibiliUrl, parseBilibiliUrl, isBilibiliSpaceUrl, parseBilibiliSpaceUrl } from '@/services/bilibili';
@@ -81,6 +81,8 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
 
   const { state: mindMapState, mindMapText, error: mindMapError, generate: generateMindMap, setState: setMindMapState } = useMindMapGenerator();
   const [showMindMap, setShowMindMap] = useState(false);
+  const [subtitleForMindmap, setSubtitleForMindmap] = useState('');
+  const [inputExpanded, setInputExpanded] = useState(true);
 
   const isLocked = state === 'downloading';
   const isLockedRef = useRef(false);
@@ -298,52 +300,95 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
 
   const isWorking = state === 'loading' || state === 'downloading' || state === 'fetching';
 
+  const fetchSubAndGenerate = useCallback(async () => {
+    try {
+      const selectedVideos = getSelectedVideos();
+      const results: { markdown: string | null; partLabel: string }[] = [];
+      for (const v of selectedVideos) {
+        const result = await fetchVideoSubtitle(v, source?.owner || '', source?.desc || '');
+        results.push({ markdown: result.markdown, partLabel: v.part || v.title });
+      }
+      const partsWithContent = results.filter(r => r.markdown);
+      if (partsWithContent.length === 0) {
+        setMindMapState('error');
+        return;
+      }
+      const subtitleText = partsWithContent
+        .map(r => `【${r.partLabel}】\n${r.markdown?.replace(/^#.*\n?/gm, '').trim() || ''}`)
+        .join('\n\n');
+      generateMindMap({ subtitleText, sourceTitle: source?.title });
+    } catch {
+      setMindMapState('error');
+    }
+  }, [videos, source, generateMindMap, setMindMapState]);
+
+  // 视频加载完毕 → 自动压缩输入区、拉取字幕、弹出思维导图
+  useEffect(() => {
+    if (state !== 'loaded' || videos.length === 0) return;
+    setInputExpanded(false);
+    // 自动拉字幕（供 MindMap 内部展示）
+    (async () => {
+      try {
+        const first = videos[0];
+        const result = await fetchVideoSubtitle(first, source?.owner || '', source?.desc || '');
+        if (result.markdown) {
+          setSubtitleForMindmap(result.markdown);
+        }
+      } catch { /* ignore */ }
+    })();
+    // 自动弹出思维导图
+    setShowMindMap(true);
+    setMindMapState('loading');
+    fetchSubAndGenerate();
+  }, [state, videos.length]);
+
   return (
-    <div className="space-y-5">
-      {/* Input */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
-          <Tv2 className="w-4 h-4 text-[#00a1d6]" />
+    <div className="space-y-3">
+      {/* Input — compact, collapses after fetch */}
+      <div className={`overflow-hidden transition-all duration-300 ease-in-out ${inputExpanded ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'} ${source ? 'mb-0' : 'mb-2'}`}>
+        <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+          <Tv2 className="w-3.5 h-3.5 text-sky-500" />
           {t('bilibili.link')}
         </label>
-        <div className="flex gap-2">
-        <div className="flex-1 flex items-stretch" ref={dropdownRef}>
-          <div className="relative flex-shrink-0">
-            <button
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              disabled={isLocked}
-              className="flex flex-col items-center justify-center w-10 h-full border border-gray-200/60 rounded-l-lg hover:bg-gray-50 transition-colors duration-150 pt-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {(() => { const Icon = modeIcon(fetchMode); return <Icon className="w-4 h-4 text-[#00a1d6]" />; })()}
-              <ChevronDown className="w-2.5 h-2.5 text-gray-400 -mt-0.5" />
-            </button>
-            {dropdownOpen && (
-              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200/60 rounded-lg shadow-lg z-20 min-w-[130px] py-1">
-                {MODE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => {
-                      setFetchMode(opt.value);
-                      setSource(null);
-                      setVideos([]);
-                      setState('idle');
-                      setDropdownOpen(false);
-                    }}
-                    className={`flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors duration-100 ${
-                      fetchMode === opt.value
-                        ? 'bg-[#00a1d6]/10 text-[#00a1d6] font-medium'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    <opt.icon className="w-3.5 h-3.5 flex-shrink-0" />
-                    {t(opt.labelKey)}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1 relative">
+        <div className="flex gap-1.5">
+          <div
+            className="flex-1 flex items-stretch h-8"
+            ref={dropdownRef}
+          >
+            <div className="relative flex-shrink-0">
+              <button
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                disabled={isLocked}
+                className="flex items-center justify-center w-7 h-8 border border-gray-200/60 rounded-l-md hover:bg-gray-50 transition-colors duration-150 disabled:opacity-50"
+              >
+                {(() => { const Icon = modeIcon(fetchMode); return <Icon className="w-3.5 h-3.5 text-sky-500" />; })()}
+                <ChevronDown className="w-2 h-2 text-gray-400 ml-0.5" />
+              </button>
+              {dropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200/60 rounded-lg shadow-lg z-20 min-w-[120px] py-1">
+                  {MODE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => {
+                        setFetchMode(opt.value);
+                        setSource(null);
+                        setVideos([]);
+                        setState('idle');
+                        setDropdownOpen(false);
+                      }}
+                      className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs transition-colors ${
+                        fetchMode === opt.value
+                          ? 'bg-sky-500/10 text-sky-500 font-medium'
+                          : 'text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      <opt.icon className="w-3 h-3 flex-shrink-0" />
+                      {t(opt.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <input
               type="url"
               value={url}
@@ -351,182 +396,111 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
               onKeyDown={(e) => { if (e.key === 'Enter' && !isWorking) handleFetch(); }}
               readOnly={isLocked}
               placeholder={fetchMode === 'space' ? t('bilibili.spacePlaceholder') : t('bilibili.placeholder')}
-              className="w-full h-full pl-3 pr-3 py-2 border-y border-r border-gray-200/60 text-sm focus:outline-none focus:ring-2 focus:ring-[#00a1d6]/40 focus:ring-inset placeholder:text-gray-400/70 rounded-r-lg"
+              className="flex-1 h-8 pl-2 pr-2 py-0 border-y border-r border-gray-200/60 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:ring-inset placeholder:text-gray-400/70 rounded-r-md"
             />
           </div>
+
+          <button
+            onClick={handleFetch}
+            disabled={!url || isWorking}
+            className={`h-8 px-3 bg-sky-500 hover:bg-sky-600 text-white text-xs font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 transition-colors duration-150 flex-shrink-0 ${!inputExpanded ? 'pointer-events-none' : ''}`}
+          >
+            {state === 'loading' ? (
+              <><Loader2 className="w-3 h-3 animate-spin" />{t('bilibili.querying')}</>
+            ) : (
+              <>{t('bilibili.query')}</>
+            )}
+          </button>
         </div>
-
-        <button
-          onClick={handleFetch}
-          disabled={!url || isWorking}
-          className="px-4 py-1.5 bg-[#00a1d6] hover:bg-[#0090c0] text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press flex-shrink-0"
-        >
-          {state === 'loading' ? (
-            <><Loader2 className="w-3 h-3 animate-spin" />{t('bilibili.querying')}</>
-          ) : (
-            <>{(() => { const Icon = modeIcon(fetchMode); return <Icon className="w-3 h-3" />; })()}{t('bilibili.query')}</>
-          )}
-        </button>
-      </div>
       </div>
 
-      {/* Video Info */}
-      {source && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
-            <Info className="w-4 h-4 text-[#00a1d6]" />
-            {t('bilibili.videoInfo')}
-          </label>
-          <div className="border border-sky-100/60 rounded-lg overflow-hidden shadow-soft">
-            <div className="bg-sky-50 p-3 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-[#00a1d6]/10 flex items-center justify-center flex-shrink-0">
-                <Tv2 className="w-5 h-5 text-[#00a1d6]" />
+      {/* Video Info — expands after fetch */}
+      <div className={`overflow-hidden transition-all duration-300 ease-in-out ${source ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
+        {source && (
+          <div className="border border-sky-100/60 rounded-lg shadow-soft">
+            {/* Compact video header */}
+            <div className="bg-sky-50 p-2 flex items-center gap-2">
+              <div className="w-8 h-8 rounded-md bg-sky-500/10 flex items-center justify-center flex-shrink-0">
+                <Tv2 className="w-4 h-4 text-sky-500" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-sky-900 truncate">{source.title}</p>
-                <p className="text-xs text-sky-600">
+                <p className="text-xs font-semibold text-sky-900 truncate">{source.title}</p>
+                <p className="text-[10px] text-sky-600">
                   {source.owner && <span className="mr-2">UP主：{source.owner}</span>}
                   {source.type === 'series' ? (
-                    <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold mr-2">合集</span>
+                    <span className="bg-amber-100 text-amber-700 px-1 py-0.5 rounded text-[9px] font-bold mr-1">合集</span>
                   ) : source.isSeries && videos.length > 1 ? (
-                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-bold mr-2">分P</span>
+                    <span className="bg-blue-100 text-blue-700 px-1 py-0.5 rounded text-[9px] font-bold mr-1">分P</span>
                   ) : null}
                   <span className="font-mono tabular-nums">{source.videoCount}</span> {source.isSeries ? t('bilibili.parts') : t('bilibili.singleVideo')}
                 </p>
               </div>
+              {/* Expand/collapse toggle */}
+              <button
+                onClick={() => setInputExpanded(!inputExpanded)}
+                className="text-xs text-gray-400 hover:text-sky-500 transition-colors flex items-center gap-0.5 flex-shrink-0"
+              >
+                {inputExpanded ? null : <ChevronRight className="w-3 h-3" />}
+                <span className="text-[10px]">{inputExpanded ? '收起' : ''}</span>
+              </button>
             </div>
 
             {videos.length > 1 && (
               <>
-                <div className="flex items-center justify-between px-3 py-1.5 bg-white border-t border-gray-100">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setListExpanded(!listExpanded)}
-                      className="text-xs text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-0.5"
-                    >
-                      {listExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      {listExpanded ? '收起' : '展开'}
-                    </button>
-                    <span className="text-xs text-gray-500">
-                      {t('bilibili.selectedParts', { selected: selected.size, total: displayedVideos.length })}
-                    </span>
-                  </div>
-                  <div className="flex gap-2 text-xs">
-                    <button onClick={selectAll} className="text-[#00a1d6] hover:underline">{t('selectAll')}</button>
+                <div className="flex items-center justify-between px-2 py-1 bg-white border-t border-gray-100">
+                  <button
+                    onClick={() => setListExpanded(!listExpanded)}
+                    className="text-[10px] text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-0.5"
+                  >
+                    {listExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
+                    {listExpanded ? '收起' : '展开'}
+                  </button>
+                  <span className="text-[10px] text-gray-500">
+                    {t('bilibili.selectedParts', { selected: selected.size, total: displayedVideos.length })}
+                  </span>
+                  <div className="flex gap-2 text-[10px]">
+                    <button onClick={selectAll} className="text-sky-500 hover:underline">{t('selectAll')}</button>
                     <button onClick={selectNone} className="text-gray-400 hover:underline">{t('deselectAll')}</button>
                   </div>
                 </div>
                 {listExpanded && (
                   <>
-                    <div
-                      className="overflow-y-auto bg-white"
-                      style={{ maxHeight: listHeight }}
-                    >
+                    <div className="overflow-y-auto bg-white" style={{ maxHeight: Math.min(listHeight, 120) }}>
                       {displayedVideos.map((video) => {
                         const key = videoKey(video);
                         return (
-                          <label
-                            key={key}
-                            className="flex items-start gap-3 p-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors duration-150"
-                          >
+                          <label key={key} className="flex items-start gap-2 px-2 py-1 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors">
                             <input
                               type="checkbox"
                               checked={selected.has(key)}
                               onChange={() => toggleVideo(key)}
-                              className="mt-1 rounded border-gray-300 text-[#00a1d6] focus:ring-[#00a1d6]"
+                              className="mt-0.5 rounded border-gray-300 text-sky-500 focus:ring-sky-500"
                             />
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm text-gray-700 line-clamp-1">
+                              <p className="text-xs text-gray-700 line-clamp-1">
                                 <span className="text-gray-400 mr-1">P{video.page}</span>
                                 {video.part || video.title}
                               </p>
-                              {video.duration && (
-                                <p className="text-xs text-gray-400 mt-0.5">
-                                  {Math.floor(video.duration / 60)}:{String(video.duration % 60).padStart(2, '0')}
-                                </p>
-                              )}
                             </div>
                           </label>
                         );
                       })}
-                    </div>
-                    <div
-                      className="flex items-center justify-center h-3 bg-gray-50 border-t border-gray-100 cursor-ns-resize hover:bg-gray-100 transition-colors group"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        const startY = e.clientY;
-                        const startH = listHeight;
-                        const onMove = (ev: MouseEvent) => {
-                          setListHeight(Math.max(60, Math.min(600, startH + (ev.clientY - startY))));
-                        };
-                        const onUp = () => {
-                          document.removeEventListener('mousemove', onMove);
-                          document.removeEventListener('mouseup', onUp);
-                        };
-                        document.addEventListener('mousemove', onMove);
-                        document.addEventListener('mouseup', onUp);
-                      }}
-                    >
-                      <div className="w-8 h-0.5 rounded-full bg-gray-300 group-hover:bg-gray-400 transition-colors" />
                     </div>
                   </>
                 )}
               </>
             )}
           </div>
+        )}
+      </div>
 
-          {canLoadMore && (
-            <button
-              onClick={() => setDisplayCount(c => Math.min(c + PAGE_SIZE, videos.length))}
-              className="w-full mt-2 py-1.5 text-xs text-[#00a1d6] hover:text-[#0090c0] hover:bg-sky-50 border border-sky-200/60 rounded-lg flex items-center justify-center gap-1 transition-colors duration-150"
-            >
-              <ChevronDown className="w-3 h-3" />加载更多（{videos.length - displayCount} 个）
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Mind Map */}
-      {videos.length > 0 && !showMindMap && (
-        <button
-          onClick={async () => {
-            setShowMindMap(true);
-            setMindMapState('loading');
-            try {
-              const selectedVideos = getSelectedVideos();
-              const results: { markdown: string | null; partLabel: string }[] = [];
-              for (const v of selectedVideos) {
-                const result = await fetchVideoSubtitle(v, source?.owner || '', source?.desc || '');
-                results.push({ markdown: result.markdown, partLabel: v.part || v.title });
-              }
-              const partsWithContent = results.filter(r => r.markdown);
-              if (partsWithContent.length === 0) {
-                setMindMapState('error');
-                setShowMindMap(false);
-                return;
-              }
-              const subtitleText = partsWithContent
-                .map(r => `【${r.partLabel}】\n${r.markdown?.replace(/^#.*\n?/gm, '').trim() || ''}`)
-                .join('\n\n');
-              generateMindMap({ subtitleText, sourceTitle: source?.title });
-            } catch {
-              setMindMapState('error');
-            }
-          }}
-          disabled={mindMapState === 'loading'}
-          className="w-full py-2 text-xs text-purple-500 hover:text-purple-600 hover:bg-purple-50 border border-purple-200/60 rounded-lg flex items-center justify-center gap-1.5 transition-colors duration-150 disabled:opacity-50"
-        >
-          {mindMapState === 'loading' ? (
-            <><Loader2 className="w-3 h-3 animate-spin" />{t('mindmap.generating')}</>
-          ) : (
-            <><Brain className="w-3 h-3" />{t('mindmap.generate')}</>
-          )}
-        </button>
-      )}
+      {/* Mind Map display */}
       {showMindMap && (mindMapState === 'loading' || mindMapState === 'done') && (
         <MindMap
           text={mindMapText}
+          subtitleText={subtitleForMindmap}
           onClose={() => { setShowMindMap(false); setMindMapState('idle'); }}
+          title={source?.title}
         />
       )}
       {showMindMap && mindMapState === 'error' && (
@@ -536,142 +510,104 @@ export function BilibiliSummary({ initialUrl, onProgress, fetchTrigger }: Props)
         </div>
       )}
 
+      {/* Download Section */}
       {videos.length > 0 && (
-        <div className="space-y-3">
-          <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
-            <Download className="w-4 h-4 text-[#00a1d6]" />
-            {t('bilibili.outputType')}
-          </label>
+        <div className="border-t border-gray-100 pt-3 space-y-2">
           <div className="flex items-center gap-1.5">
-            <div className="flex rounded-lg border border-gray-200/60 overflow-hidden">
+            <div className="flex rounded-md border border-gray-200/60 overflow-hidden">
               <button
                 onClick={() => setExportMode('separate')}
-                className={`px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 ${
-                  exportMode === 'separate'
-                    ? 'bg-[#00a1d6] text-white'
-                    : 'bg-white text-gray-400 hover:text-gray-500'
+                className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                  exportMode === 'separate' ? 'bg-sky-500 text-white' : 'bg-white text-gray-400 hover:text-gray-500'
                 }`}
-              >
-                {t('bilibili.separate')}
-              </button>
+              >{t('bilibili.separate')}</button>
               <button
                 onClick={() => setExportMode('merged')}
-                className={`px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 border-l border-gray-200/60 ${
-                  exportMode === 'merged'
-                    ? 'bg-[#00a1d6] text-white'
-                    : 'bg-white text-gray-400 hover:text-gray-500'
+                className={`px-2 py-0.5 text-[10px] font-medium transition-colors border-l border-gray-200/60 ${
+                  exportMode === 'merged' ? 'bg-sky-500 text-white' : 'bg-white text-gray-400 hover:text-gray-500'
                 }`}
-              >
-                {t('bilibili.merged')}
-              </button>
+              >{t('bilibili.merged')}</button>
             </div>
             <select
               value={outputFormat}
               onChange={(e) => setOutputFormat(e.target.value as OutputFormat)}
-              className="text-[11px] border border-gray-200/60 rounded-lg px-2 py-1 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-[#00a1d6]/40"
+              className="text-[10px] border border-gray-200/60 rounded-md px-1.5 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-sky-500/40"
             >
               {OUTPUT_FORMATS.map((f) => (
                 <option key={f.value} value={f.value}>{f.label}</option>
               ))}
             </select>
             <div className="flex-1" />
-            <span className="text-[11px] text-gray-500">{t('bilibili.aiPolish')}</span>
+            <span className="text-[10px] text-gray-500">{t('bilibili.aiPolish')}</span>
             <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={aiPolish}
-                onChange={(e) => setAiPolish(e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-[#00a1d6]/40 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#00a1d6]"></div>
+              <input type="checkbox" checked={aiPolish} onChange={(e) => setAiPolish(e.target.checked)} className="sr-only peer" />
+              <div className="w-6 h-3.5 bg-gray-200 peer-focus:outline-none peer-focus:ring-1 peer-focus:ring-sky-500/40 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-sky-500" />
             </label>
           </div>
-
           {aiPolish && (
-            <div>
-              <p className="text-xs font-medium text-gray-600 mb-1.5">{t('bilibili.promptStyle')}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {PROMPT_STYLES.map((style) => (
-                  <button
-                    key={style.value}
-                    onClick={() => setAiPromptStyle(style.value)}
-                    className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
-                      aiPromptStyle === style.value
-                        ? 'bg-[#00a1d6] text-white border-[#00a1d6]'
-                        : 'bg-white text-gray-500 border-gray-200 hover:border-[#00a1d6]/40 hover:text-[#00a1d6]'
-                    }`}
-                    title={style.description}
-                  >
-                    {style.label}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setAiPromptStyle('custom')}
-                  className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors duration-150 ${
-                    aiPromptStyle === 'custom'
-                      ? 'bg-[#00a1d6] text-white border-[#00a1d6]'
-                      : 'bg-white text-gray-500 border-gray-200 hover:border-[#00a1d6]/40 hover:text-[#00a1d6]'
+            <div className="flex flex-wrap gap-1">
+              {PROMPT_STYLES.map((style) => (
+                <button key={style.value} onClick={() => setAiPromptStyle(style.value)}
+                  className={`px-2 py-0.5 text-[10px] rounded-full border transition-colors ${
+                    aiPromptStyle === style.value ? 'bg-sky-500 text-white border-sky-500' : 'bg-white text-gray-500 border-gray-200 hover:border-sky-500/40 hover:text-sky-500'
                   }`}
-                >
-                  Custom
-                </button>
-              </div>
+                  title={style.description}>{style.label}</button>
+              ))}
+              <button onClick={() => setAiPromptStyle('custom')}
+                className={`px-2 py-0.5 text-[10px] rounded-full border transition-colors ${
+                  aiPromptStyle === 'custom' ? 'bg-sky-500 text-white border-sky-500' : 'bg-white text-gray-500 border-gray-200 hover:border-sky-500/40 hover:text-sky-500'
+                }`}>Custom</button>
             </div>
           )}
-
           <button
             onClick={handleDownload}
             disabled={selected.size === 0 || isWorking}
-            className="w-full py-2.5 bg-sky-500 hover:bg-sky-600 text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-btn hover:shadow-btn-hover transition-all duration-150 btn-press"
+            className="w-full py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors duration-150"
           >
             {state === 'downloading' ? (
-              <><Loader2 className="w-4 h-4 animate-spin" />{t('bilibili.fetchingSubtitles')}</>
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" />{t('bilibili.fetchingSubtitles')}</>
             ) : (
-              <><Download className="w-4 h-4" />{t('bilibili.downloadOneClick')}（{selected.size}）</>
+              <><Download className="w-3.5 h-3.5" />{t('bilibili.downloadOneClick')}（{selected.size}）</>
             )}
           </button>
         </div>
       )}
 
+      {/* Download progress overlay */}
       {isLocked && (
         <DownloadOverlay
           title="正在导出字幕…"
           detail={dlProgress?.title || (dlProgress ? `${dlProgress.current}/${dlProgress.total}` : '')}
           current={dlProgress?.current || 0}
           total={dlProgress?.total || 0}
-          iconColor="#00a1d6"
-          iconBgColor="rgb(0 161 214 / 0.1)"
-          progressColor="#00a1d6"
+          iconColor="#0ea5e9"
+          iconBgColor="rgb(14 165 233 / 0.1)"
+          progressColor="#0ea5e9"
           onCancel={handleCancel}
         />
       )}
 
+      {/* Status */}
       {state === 'done' && doneMsg && (
-        <div className="flex items-center gap-2 text-green-600 text-sm bg-green-50 border border-green-100/60 rounded-lg p-3">
-          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+        <div className="flex items-center gap-2 text-green-600 text-xs bg-green-50 border border-green-100/60 rounded-lg p-2">
+          <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
           {doneMsg}
         </div>
       )}
-
       {state === 'error' && (
-        <div className="flex items-center gap-2 text-red-500 text-sm bg-red-50 border border-red-100/60 rounded-lg p-3 shadow-soft">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+        <div className="flex items-center gap-2 text-red-500 text-xs bg-red-50 border border-red-100/60 rounded-lg p-2">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
           {error}
         </div>
       )}
-
       {!source && state === 'idle' && (
-        <div className="text-xs text-gray-400 space-y-2 bg-surface-sunken rounded-xl p-3.5">
+        <div className="text-[10px] text-gray-400 space-y-1 bg-surface-sunken rounded-lg p-2.5">
           <p>{t('bilibili.supportedFormats')}</p>
           <ul className="list-disc list-inside space-y-0.5">
             <li>{t('bilibili.formatVideo')}</li>
             <li>{t('bilibili.formatPart')}</li>
             <li>个人主页: space.bilibili.com/xxx</li>
           </ul>
-          <p className="flex items-center gap-1 text-amber-500">
-            <AlertCircle className="w-3 h-3 flex-shrink-0" />
-            {t('bilibili.apiNote')}
-          </p>
         </div>
       )}
     </div>

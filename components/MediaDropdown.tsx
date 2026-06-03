@@ -72,13 +72,14 @@ export function MediaDropdown({ activeTab, onTabChange, t }: MediaDropdownProps)
           setIsOpen(!isOpen);
         }}
         className={cn(
-          'w-full py-2 text-[11px] font-medium',
+          'w-full py-2 text-xs font-medium',
           'flex flex-col items-center gap-0.5 relative',
-          'border-b-2 transition-all duration-200 ease-spring',
-          'hover:text-gray-500',
+          'rounded-t-md',
+          'border-b-2 transition-colors duration-150',
+          'hover:text-gray-600 hover:bg-gray-100/50',
           isMediaActive 
-            ? `${currentMedia.color} ${currentMedia.borderColor}`
-            : 'text-gray-400 border-transparent',
+            ? `${currentMedia.color} border-current bg-blue-50/30`
+            : 'text-gray-500 border-transparent',
         )}
       >
         <currentMedia.icon className="w-4 h-4" />
@@ -110,7 +111,7 @@ export function MediaDropdown({ activeTab, onTabChange, t }: MediaDropdownProps)
                 key={value}
                 onClick={() => handleMediaSelect(value)}
                 className={cn(
-                  'w-full px-3 py-2 text-[11px] font-medium flex items-center gap-2',
+                  'w-full px-3 py-2 text-xs font-medium flex items-center gap-2',
                   'hover:bg-gray-50 transition-colors duration-150',
                   activeTab === value ? `${color} bg-gray-50` : 'text-gray-600'
                 )}

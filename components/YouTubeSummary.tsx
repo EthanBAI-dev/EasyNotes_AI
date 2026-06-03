@@ -455,7 +455,7 @@ export function YouTubeSummary({ initialUrl, onProgress, fetchTrigger }: Props) 
 
       {/* Download Section */}
       {videos.length > 0 && (
-        <div className="space-y-3">
+        <div className="border-t border-gray-100 pt-4 space-y-3">
           <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
             <Download className="w-4 h-4 text-red-500" />
             {t('youtube.outputMode')}

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, Download, ZoomIn, ZoomOut, Maximize, Minimize, Maximize2, X, Brain } from 'lucide-react';
+import { Loader2, Download, ZoomIn, ZoomOut, Maximize, Minimize, Maximize2, X, Brain, FileText, Code2 } from 'lucide-react';
 import { t } from '@/lib/i18n';
 import { getSettings } from '@/lib/settings';
 import { PROVIDER_ENDPOINTS, DEFAULT_MODELS } from '@/services/ai-polish';
@@ -195,15 +195,21 @@ function renderSvg(node: MindNode, depth: number, colorIdx: number): JSX.Element
 interface Props {
   text: string;
   onClose: () => void;
+  title?: string;
+  /** raw subtitle markdown for display & txt export */
+  subtitleText?: string;
 }
 
-export function MindMap({ text, onClose }: Props) {
+export function MindMap({ text, onClose, title, subtitleText }: Props) {
   const [scale, setScale] = useState(0.6);
   const [pan, setPan] = useState({ x: 40, y: 30 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showToolbar, setShowToolbar] = useState(false);
+  const [mode, setMode] = useState<'mindmap' | 'subtitle' | 'raw'>('mindmap');
+
+  const rawText = subtitleText || text;
+  const displaySubtitleText = subtitleText || text;
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -258,7 +264,7 @@ export function MindMap({ text, onClose }: Props) {
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
 
-  const handleDownload = useCallback(async () => {
+  const handleExportPng = useCallback(async () => {
     if (!svgRef.current) return;
     const svgData = new XMLSerializer().serializeToString(svgRef.current);
     const canvas = document.createElement('canvas');
@@ -280,10 +286,69 @@ export function MindMap({ text, onClose }: Props) {
         a.href = URL.createObjectURL(blob);
         a.download = 'mindmap.png';
         a.click();
-      });
+      }, 'image/png');
     };
     img.src = url;
   }, [svgSize]);
+
+  const handleExportSource = useCallback(() => {
+    if (!tree) return;
+    const toObj = (n: MindNode): any => ({
+      text: n.text,
+      children: n.children.map(toObj),
+    });
+    const json = JSON.stringify(toObj(tree), null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'mindmap.json';
+    a.click();
+  }, [tree]);
+
+  const handleExportTxt = useCallback(() => {
+    const plain = rawText
+      .replace(/^#{1,4}\s+/gm, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/^\s*[-*+]\s+/gm, '  • ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    const blob = new Blob([plain], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'subtitle.txt';
+    a.click();
+  }, [rawText]);
+
+  const subtitleHtml = useMemo(() => {
+    let html = displaySubtitleText
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    html = html.replace(/^### (.+)$/gm, '<h4 class="text-sm font-semibold text-gray-800 mt-3 mb-1">$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3 class="text-base font-bold text-purple-700 mt-4 mb-2 border-b border-purple-100 pb-1">$1</h3>');
+    html = html.replace(/^# (.+)$/gm, '<h2 class="text-lg font-bold text-purple-800 mt-5 mb-3">$1</h2>');
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>');
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    html = html.replace(/`([^`]+)`/g, '<code class="bg-purple-50 text-purple-700 px-1 rounded text-xs">$1</code>');
+    html = html.replace(/^\s*[-*+]\s+(.+)$/gm, '<li class="ml-4 list-disc text-gray-700">$1</li>');
+    html = html.replace(/\n{2,}/g, '</p><p class="mb-2">');
+    html = '<p class="mb-2">' + html + '</p>';
+    return html;
+  }, [displaySubtitleText]);
+
+  const rawPlainText = useMemo(() => {
+    return rawText
+      .replace(/^#{1,4}\s+/gm, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/^\s*[-*+]\s+/gm, '  • ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }, [rawText]);
 
   const handleZoomIn = () => setScale(s => Math.min(4, Math.round(s * 1.25 * 100) / 100));
   const handleZoomOut = () => setScale(s => Math.max(0.15, Math.round(s / 1.25 * 100) / 100));
@@ -325,7 +390,7 @@ export function MindMap({ text, onClose }: Props) {
         <div className="flex items-center justify-between px-3 py-2 bg-purple-50 border-b border-purple-100 rounded-t-lg">
           <span className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
             <Brain className="w-4 h-4 text-purple-500" />
-            {t('mindmap.title')}
+            {title || t('mindmap.title')}
           </span>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-0.5"><X className="w-4 h-4" /></button>
         </div>
@@ -342,32 +407,43 @@ export function MindMap({ text, onClose }: Props) {
       {/* SVG Viewport */}
       <div
         ref={viewportRef}
-        className="overflow-hidden select-none relative group"
+        className={`overflow-hidden select-none relative group ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         style={{ height: isFullscreen ? '100%' : '360px' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={(e) => { handleMouseUp(); setShowToolbar(false); }}
-        onMouseEnter={() => setShowToolbar(true)}
+        onMouseLeave={(e) => { handleMouseUp(); }}
+        onMouseEnter={() => {}}
       >
         {/* Toolbar */}
         <div
-          className={`absolute top-2 right-2 flex items-center gap-1 bg-white/90 backdrop-blur border border-gray-200 rounded-lg shadow p-1 z-10 transition-opacity duration-200 ${showToolbar ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          className="absolute top-2 right-2 flex items-center gap-1 bg-white/90 backdrop-blur border border-gray-200 rounded-lg shadow-sm p-1 z-10"
         >
-          <button onClick={handleDownload} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.download')}>
-            <Download className="w-3.5 h-3.5" />
-          </button>
-          <div className="w-px h-4 bg-gray-200" />
-          <button onClick={handleZoomIn} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.zoomIn')}>
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={handleZoomOut} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.zoomOut')}>
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={handleFit} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.fit')}>
-            <Maximize className="w-3.5 h-3.5" />
-          </button>
-          <div className="w-px h-4 bg-gray-200" />
+          {mode === 'mindmap' ? (
+            <>
+              <button onClick={handleExportPng} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.exportPng')}>
+                <Download className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleExportSource} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.exportSource')}>
+                <Code2 className="w-3.5 h-3.5" />
+              </button>
+              <div className="w-px h-4 bg-gray-200" />
+              <button onClick={handleZoomIn} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.zoomIn')}>
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleZoomOut} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.zoomOut')}>
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={handleFit} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.fit')}>
+                <Maximize className="w-3.5 h-3.5" />
+              </button>
+              <div className="w-px h-4 bg-gray-200" />
+            </>
+          ) : (
+            <button onClick={handleExportTxt} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={t('mindmap.exportTxt')}>
+              <Download className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button onClick={handleFullscreen} className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors" title={isFullscreen ? t('mindmap.exitFullscreen') : t('mindmap.fullscreen')}>
             {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
@@ -404,16 +480,67 @@ export function MindMap({ text, onClose }: Props) {
     >
       {/* Header */}
       <div className={`flex items-center justify-between px-3 py-2 bg-purple-50 border-b border-purple-100 flex-shrink-0 ${isFullscreen ? '' : 'rounded-t-lg'}`}>
-        <span className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
-          <Brain className="w-4 h-4 text-purple-500" />
-          {t('mindmap.title')}
-        </span>
+        {/* 3-switch toggle */}
+        <div className="flex rounded-lg border border-purple-200/60 overflow-hidden bg-white">
+          <button
+            onClick={() => setMode('mindmap')}
+            className={`px-2.5 py-1 text-xs font-medium transition-all duration-150 flex items-center gap-1.5 ${
+              mode === 'mindmap'
+                ? 'bg-purple-500 text-white shadow-sm'
+                : 'text-gray-500 hover:text-purple-600 hover:bg-purple-50/50'
+            }`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="5" r="2.5"/><path d="M12 7.5v4"/><circle cx="5" cy="16" r="2.5"/><circle cx="19" cy="16" r="2.5"/><path d="M12 11.5L7 14.5"/><path d="M12 11.5L17 14.5"/>
+            </svg>
+            {t('mindmap.modeMap')}
+          </button>
+          <button
+            onClick={() => setMode('subtitle')}
+            className={`px-2.5 py-1 text-xs font-medium transition-all duration-150 flex items-center gap-1.5 border-l border-purple-200/60 ${
+              mode === 'subtitle'
+                ? 'bg-purple-500 text-white shadow-sm'
+                : 'text-gray-500 hover:text-purple-600 hover:bg-purple-50/50'
+            }`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/>
+            </svg>
+            {t('mindmap.modeSubtitle')}
+          </button>
+          <button
+            onClick={() => setMode('raw')}
+            className={`px-2.5 py-1 text-xs font-medium transition-all duration-150 flex items-center gap-1.5 border-l border-purple-200/60 ${
+              mode === 'raw'
+                ? 'bg-purple-500 text-white shadow-sm'
+                : 'text-gray-500 hover:text-purple-600 hover:bg-purple-50/50'
+            }`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="16 3 21 3 21 8"/><line x1="4" y1="11" x2="12" y2="11"/><line x1="4" y1="17" x2="12" y2="17"/><line x1="14" y1="20" x2="20" y2="14"/><polyline points="14 14 20 14 20 20"/>
+            </svg>
+            {t('mindmap.modeRaw')}
+          </button>
+        </div>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-0.5">
           <X className="w-4 h-4" />
         </button>
       </div>
       <div className="flex-1 min-h-0">
-        {svgViewport}
+        {mode === 'mindmap' ? svgViewport : mode === 'subtitle' ? (
+          <div
+            className="overflow-auto p-4 text-sm text-gray-700 leading-relaxed"
+            style={{ height: isFullscreen ? '100%' : '360px' }}
+            dangerouslySetInnerHTML={{ __html: subtitleHtml }}
+          />
+        ) : (
+          <div
+            className="overflow-auto p-4 text-sm text-gray-600 leading-relaxed whitespace-pre-wrap font-mono"
+            style={{ height: isFullscreen ? '100%' : '360px' }}
+          >
+            {rawPlainText}
+          </div>
+        )}
       </div>
     </div>
   );

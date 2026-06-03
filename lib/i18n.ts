@@ -174,6 +174,12 @@ const zh = {
   'mindmap.fit': '适应页面',
   'mindmap.fullscreen': '全屏',
   'mindmap.exitFullscreen': '退出全屏',
+  'mindmap.modeMap': '思维导图',
+  'mindmap.modeSubtitle': '字幕',
+  'mindmap.modeRaw': '原文',
+  'mindmap.exportPng': '导出 PNG',
+  'mindmap.exportSource': '导出源文件',
+  'mindmap.exportTxt': '导出 TXT',
   'onboarding.stepYouTube': '粘贴 YouTube 视频、播放列表或频道链接，批量下载字幕。',
 
   // ── HistoryPanel ──
@@ -496,6 +502,12 @@ const en: Record<keyof typeof zh, string> = {
   'mindmap.fit': 'Fit to Screen',
   'mindmap.fullscreen': 'Fullscreen',
   'mindmap.exitFullscreen': 'Exit Fullscreen',
+  'mindmap.modeMap': 'Mind Map',
+  'mindmap.modeSubtitle': 'Subtitle',
+  'mindmap.modeRaw': 'Raw',
+  'mindmap.exportPng': 'Export PNG',
+  'mindmap.exportSource': 'Export Source',
+  'mindmap.exportTxt': 'Export TXT',
   'onboarding.stepYouTube': 'Paste YouTube video, playlist, or channel links to download transcripts.',
 
   // ── HistoryPanel ──

@@ -30,6 +30,7 @@ coverage/
 *.zip
 youtube-transcript-api-master/
 dist-dev/
+EasyNotes_AI/
 
 # Screenshot build artifacts
 docs/screenshots/raw/

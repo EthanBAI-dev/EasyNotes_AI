@@ -345,7 +345,7 @@ export function PodcastSummary({ initialUrl }: Props) {
 
       {/* Download Section */}
       {episodes.length > 0 && (
-        <div className="space-y-3">
+        <div className="border-t border-gray-100 pt-4 space-y-3">
           <label className="block text-sm font-medium text-gray-700 flex items-center gap-1.5">
             <Download className={`w-4 h-4 ${colors.textAccent}`} />
             {t('podcast.aiSummary')}
